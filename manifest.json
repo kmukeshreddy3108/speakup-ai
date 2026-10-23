@@ -1,0 +1,43 @@
+{
+  "schema": 2,
+  "required_executas": [
+    {
+      "tool_id": "tool-dev-speakup-ai"
+    }
+  ],
+  "host_capabilities": ["llm.sample", "aps.kv"],
+  "tags": ["speakup-ai", "english", "language-learning", "conversation"],
+  "system_prompt_addendum": "You are coaching an English conversation practice session inside SpeakUp AI. Keep responses concise and encouraging.",
+  "ui": {
+    "bundle": {
+      "format": "static-spa",
+      "entry": "index.html",
+      "external_origins": [
+        "https://fonts.googleapis.com",
+        "https://fonts.gstatic.com"
+      ]
+    },
+    "views": [
+      {
+        "name": "main",
+        "title": "SpeakUp AI",
+        "default": true,
+        "default_size": { "w": 820, "h": 620 },
+        "min_size": { "w": 420, "h": 480 }
+      }
+    ],
+    "host_api": {
+      "tools": ["tool-dev-speakup-ai"],
+      "storage": ["get", "set", "list"],
+      "window": ["set_title", "ready"],
+      "audio": ["session"]
+    },
+    "csp_overrides": {},
+    "state_merge": "last_writer_wins"
+  },
+  "dev": {
+    "fixtures": ["fixtures/*.jsonl"],
+    "seed_storage": {},
+    "user_id": 1
+  }
+}
