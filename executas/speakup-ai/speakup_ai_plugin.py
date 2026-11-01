@@ -1066,7 +1066,7 @@ TOOL_MAP = {
 
 MANIFEST = {
     "name": TOOL_ID,
-    "version": "0.3.0",
+    "version": "0.3.1",
     "host_capabilities": ["llm.sample", "aps.kv"],
     "tools": [
         {
@@ -1188,7 +1188,7 @@ def handle_request(req: dict) -> None:
                 "id": rid,
                 "result": {
                     "protocolVersion": PROTOCOL_VERSION,
-                    "serverInfo": {"name": TOOL_ID, "version": "0.3.0"},
+                    "serverInfo": {"name": TOOL_ID, "version": "0.3.1"},
                     "capabilities": {"sampling": {}, "storage": {}},
                 },
             })

@@ -38,28 +38,25 @@ SpeakUp AI upholds absolute transparency about where AI is used versus determini
 
 ### Environment Check
 
-```bash
-node --version     # 22+
-uv --version       # any modern version
-anna-app --version # 0.1.59+
-anna-app doctor    # all required checks should pass
-anna-app whoami    # verify active login against https://anna.partners
+```
+node --version
+uv --version
+anna-app --version
+anna-app doctor
+anna-app whoami
 ```
 
 ---
 
 ## 4. Running & Validating Locally
 
-```bash
-# 1. Validate App Manifest and schema strictly
+```
 anna-app validate --strict
 
-# 2. Run Python Executa unit tests
 cd executas/speakup-ai
 uv run pytest
 cd ../..
 
-# 3. Launch local developer harness
 anna-app dev --port 5180
 ```
 
@@ -72,28 +69,28 @@ Open `http://localhost:5180/` in Google Chrome or Microsoft Edge.
 > **Note:** Publishing to Anna and submitting for review are manual steps performed by the developer.
 
 1. **Build Cross-Platform Binaries:**
-   Push a version tag (e.g. `v0.3.0`) or trigger the GitHub Actions workflow manually via **Run workflow** (`workflow_dispatch`) in the Actions tab. The workflow builds:
-   - `speakup-ai-0.3.0-darwin-arm64.tar.gz`
-   - `speakup-ai-0.3.0-darwin-x86_64.tar.gz`
-   - `speakup-ai-0.3.0-linux-x86_64.tar.gz` (Critical for Anna Cloud Agents)
-   - `speakup-ai-0.3.0-windows-x86_64.zip`
+   Push a version tag (e.g. `v0.3.1`) or trigger the GitHub Actions workflow manually via **Run workflow** (`workflow_dispatch`) in the Actions tab. The workflow builds:
+   - `speakup-ai-0.3.1-darwin-arm64.tar.gz`
+   - `speakup-ai-0.3.1-darwin-x86_64.tar.gz`
+   - `speakup-ai-0.3.1-linux-x86_64.tar.gz` (Critical for Anna Cloud Agents)
+   - `speakup-ai-0.3.1-windows-x86_64.zip`
 2. **Download Archives:**
    Place the 4 downloaded archives and their corresponding `.sha256` files into:
    ```
-   executas/speakup-ai/dist/speakup-ai/0.3.0/
+   executas/speakup-ai/dist/speakup-ai/0.3.1/
    ```
 3. **Switch to Binary Distribution:**
    In `executas/speakup-ai/executa.json`, change `"active": "local"` to `"active": "binary"`.
 4. **Verify Strict Validation:**
-   ```bash
+   ```
    anna-app validate --strict
    ```
 5. **Publish to Anna Platform:**
-   ```bash
+   ```
    anna-app apps publish
    ```
 6. **Submit for Review:**
-   ```bash
+   ```
    anna-app apps submit-review speakup-ai
    ```
    *(Alternatively, submit via the Anna Developer portal at https://anna.partners/developers)*
