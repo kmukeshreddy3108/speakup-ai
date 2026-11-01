@@ -2,6 +2,91 @@ import pytest
 import speakup_ai_plugin as plugin
 
 
+REGRESSION_CASES = [
+    ("hello", "Hello."),
+    ("i am", "I am."),
+    ("hello there", "Hello there."),
+    ("good morning", "Good morning."),
+    ("how are you", "How are you?"),
+    ("what is your name", "What is your name?"),
+    ("where are you from", "Where are you from?"),
+    ("i like reading", "I like reading."),
+    ("i am a student", "I am a student."),
+    ("this is my book", "This is my book."),
+    ("hello  there", "Hello there."),
+    ("I  am  ready", "I am ready."),
+    ("hello , how are you", "Hello, how are you?"),
+    ("I like tea .", "I like tea."),
+    ("how are you ?", "How are you?"),
+    ("i dont know", "I don't know."),
+    ("i cant go", "I can't go."),
+    ("she doesnt understand", "She doesn't understand."),
+    ("we arent late", "We aren't late."),
+    ("theyre working", "They're working."),
+    ("speal", "Speak."),
+    ("exiting", "Exciting."),
+    ("recieve", "Receive."),
+    ("becuase", "Because."),
+    ("definately", "Definitely."),
+    (" enviroment ", "Environment."),
+    ("teh answer", "The answer."),
+    ("I realy like it", "I really like it."),
+    ("She go to school yesterday", "She went to school yesterday."),
+    ("He don't like it", "He doesn't like it."),
+    ("I have 20 years", "I am 20 years old."),
+    ("how do are doing", "How are you doing?"),
+    ("I has a car", "I have a car."),
+    ("She have two books", "She has two books."),
+    ("They was happy", "They were happy."),
+    ("He were tired", "He was tired."),
+    ("I is ready", "I am ready."),
+    ("We is students", "We are students."),
+    ("She walk to work", "She walks to work."),
+    ("He play football", "He plays football."),
+    ("I goed home", "I went home."),
+    ("She buyed a gift", "She bought a gift."),
+    ("I maked dinner", "I made dinner."),
+    ("Yesterday I go to class", "Yesterday I went to class."),
+    ("Last week she visit us", "Last week she visited us."),
+    ("I am engineer", "I am an engineer."),
+    ("She is doctor", "She is a doctor."),
+    ("He is student", "He is a student."),
+    ("I want go home", "I want to go home."),
+    ("I enjoy to read", "I enjoy reading."),
+    ("very much people like music", "Very many people like music."),
+    ("I am good in English", "I am good at English."),
+    ("depend of the weather", "Depend on the weather."),
+    ("discuss about the problem", "Discuss the problem."),
+    ("explain me this", "Explain this to me."),
+    ("I look forward to meet you", "I look forward to meeting you."),
+    ("Can you suggest me a topic", "Can you suggest a topic to me?"),
+    ("What topic we can speak", "What topic can we speak about?"),
+    ("Can you give me some topic that we can speal on", "Can you give me some topics that we can speak about?"),
+    ("I don't know nothing", "I don't know anything."),
+    ("She can sings well", "She can sing well."),
+    ("I am agree with you", "I agree with you."),
+    ("I did not went there", "I did not go there."),
+    ("This informations are useful", "This information is useful."),
+    ("The people is friendly", "The people are friendly."),
+    ("I have finished my work", "I have finished my work."),
+    ("She is studying English.", "She is studying English."),
+    ("What time is it?", "What time is it?"),
+    ("I am happy today.", "I am happy today."),
+    ("They went home yesterday.", "They went home yesterday."),
+]
+
+
+@pytest.mark.parametrize("original, expected", REGRESSION_CASES)
+def test_correction_regression_contract(original, expected):
+    result = plugin.correct_sentence(original)
+    assert result["corrected"] == expected
+    if original in {"I have finished my work", "She is studying English.", "What time is it?", "I am happy today.", "They went home yesterday."}:
+        assert result["isCorrect"] is True
+        assert result["category"] == "Clear expression"
+    else:
+        assert result["isCorrect"] is False
+
+
 def test_required_corrections():
     cases = {
         "hello how do are doing": "Hello, how are you doing?",
@@ -80,6 +165,16 @@ def test_malformed_coach_json_is_rejected():
     assert parsed["follow_up"] == "What next?"
 
 
+def test_coach_json_includes_strict_correction_payload():
+    parsed = plugin._parse_coach_json(
+        '{"original":"hello","corrected":"Hello.","naturalAlternative":"Hi there.",'
+        '"errors":[{"type":"capitalization","wrong":"hello","right":"Hello.","explanation":"Start with a capital."}],'
+        '"isCorrect":false,"reply":"You greeted me clearly.","followUp":"Where are you from?"}'
+    )
+    assert parsed["correction"]["corrected"] == "Hello."
+    assert parsed["correction"]["errors"][0]["right"] == "Hello."
+
+
 def test_coach_turn_uses_rule_based_fallback_when_sampling_unavailable():
     original = plugin._sampling_available
     plugin._sampling_available = False
@@ -123,3 +218,21 @@ def test_start_session_contract():
     assert result["data"]["total_turns"] is None
     assert result["data"]["source"] in ("ai", "rules")
     assert result["data"]["opening_prompt"]
+
+
+def test_fallback_answers_user_question_without_generic_praise():
+    original = plugin._sampling_available
+    plugin._sampling_available = False
+    try:
+        result = plugin.tool_coach_turn(
+            {"user_input": "What topic can we discuss?", "scenario_key": "everyday",
+             "turn_number": 1, "session_id": "test-session", "input_mode": "typed"},
+            {}, "test-invoke",
+        )
+    finally:
+        plugin._sampling_available = original
+    data = result["data"]
+    assert "great conversational question" not in data["full_message"].lower()
+    assert "topic" in data["follow_up"].lower()
+    assert data["correction"]["errors"] == []
+    assert data["correction"]["naturalAlternative"]

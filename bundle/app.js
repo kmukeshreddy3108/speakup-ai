@@ -55,6 +55,10 @@ let recognition          = null;
 let recognizedText       = "";
 let isListening          = false;
 let autoListenAfterCoach = true;
+let handsFreeEnabled = false;
+let recognitionRetryCount = 0;
+let recognitionRetryTimer = null;
+let speechRate = 1;
 
 // Notebook & Progress
 let notebookEntries      = [];
@@ -113,6 +117,7 @@ const timerPill           = $("timer-pill");
 const soundToggleBtn      = $("sound-toggle-btn");
 const soundIcon           = $("sound-icon");
 const soundLabel          = $("sound-label");
+const handsfreeToggleBtn  = $("handsfree-toggle-btn");
 const endSessionBtn       = $("end-session-btn");
 
 // Coach Stage Card
@@ -413,7 +418,7 @@ function speakCoachPrompt(text, onComplete) {
 
   const utterance = new SpeechSynthesisUtterance(clean);
   utterance.lang = "en-US";
-  utterance.rate = 0.95;
+  utterance.rate = speechRate;
 
   const voices = window.speechSynthesis.getVoices();
   const enVoice =
@@ -615,9 +620,23 @@ async function startListening() {
       isListening = false;
       if (voiceState === "listening") {
         if (recognizedText.trim()) {
-          setVoiceState("ready", "Speech captured · Tap finish to send");
+          if (handleVoiceCommand(recognizedText)) {
+            setVoiceState("ready", "Command accepted");
+          } else if (handsFreeEnabled && !isPaused && !isSubmitting) {
+            setVoiceState("processing", "Speech captured · Sending…");
+            submitTurn(recognizedText);
+          } else {
+            setVoiceState("ready", "Speech captured · Tap finish to send");
+          }
         } else {
-          setVoiceState("ready");
+          if (handsFreeEnabled && !isPaused) {
+            setVoiceState("ready", "No speech detected · Reconnecting mic…");
+            clearTimeout(recognitionRetryTimer);
+            recognitionRetryTimer = setTimeout(() => startListening(), Math.min(4000, 500 * (recognitionRetryCount + 1)));
+            recognitionRetryCount += 1;
+          } else {
+            setVoiceState("ready");
+          }
           transcriptPreview.classList.remove("visible");
         }
       }
@@ -631,12 +650,43 @@ async function startListening() {
     showSpeechDiagnostic("Failed to activate speech recognition. Please type your response below.");
     expandTypeDrawer();
   }
+
+  function toggleHandsFree() {
+    handsFreeEnabled = !handsFreeEnabled;
+    if (handsfreeToggleBtn) {
+      handsfreeToggleBtn.classList.toggle("active", handsFreeEnabled);
+      handsfreeToggleBtn.setAttribute("aria-pressed", String(handsFreeEnabled));
+    }
+    if (handsFreeEnabled) {
+      autoListenAfterCoach = true;
+      toast("Hands-free on. Speak after the coach finishes.", "info");
+      if (!isListening && !isPaused && !isSubmitting) startListening();
+    } else {
+      clearTimeout(recognitionRetryTimer);
+      toast("Hands-free off. Tap Finish & Send when ready.", "info");
+    }
+  }
 }
 
 function stopListening() {
   isListening = false;
   if (recognition) {
     try { recognition.stop(); } catch {}
+  }
+
+  function handleVoiceCommand(text) {
+    const command = text.trim().toLowerCase();
+    if (command === "pause") { if (!isPaused) togglePauseSession(); return true; }
+    if (command === "resume") { if (isPaused) togglePauseSession(); return true; }
+    if (command === "repeat") { replayCoachPrompt(); return true; }
+    if (command === "say it slower") { speechRate = 0.75; replayCoachPrompt(); return true; }
+    if (command === "faster") { speechRate = 1.25; replayCoachPrompt(); return true; }
+    if (command === "correct me") { autoListenAfterCoach = true; toast("Corrections are on.", "info"); return true; }
+    if (command === "don't correct me" || command === "dont correct me") { toast("Corrections remain in your notebook; spoken corrections are off.", "info"); return true; }
+    if (command === "what did i do wrong") { tabNotebook?.click(); return true; }
+    if (command === "end session") { endSession("manual"); return true; }
+    if (command.startsWith("change topic to ")) { toast(`Topic requested: ${text.slice(16)}`, "info"); return false; }
+    return false;
   }
   if (voiceState === "listening" || voiceState === "requesting") {
     setVoiceState("ready");
@@ -1036,9 +1086,10 @@ async function startSession() {
   turnNumber  = 1;
 
   convTitle.textContent    = d.scenario_title || "Practice Session";
-  convSubtitle.textContent = "Turn 1";
+  convSubtitle.textContent = `Turn 1 · ${d.source === "ai" ? "AI coach" : "Basic mode: AI unavailable"}`;
 
   updateCoachLabel(d.source || "rules");
+  recognitionRetryCount = 0;
 
   // Reset inputs
   transcriptPreview.classList.remove("visible");
@@ -1148,7 +1199,7 @@ async function submitTurn(providedText) {
   updateCoachLabel(d.source || "rules");
 
   turnNumber = d.next_turn_number || (turnNumber + 1);
-  convSubtitle.textContent = `Turn ${turnNumber}`;
+  convSubtitle.textContent = `Turn ${turnNumber} · ${d.source === "ai" ? "AI coach" : "Basic mode: AI unavailable"}`;
 
   if (d.correction && !d.correction.isCorrect) {
     sessionMistakesCount += 1;
@@ -1169,7 +1220,7 @@ async function endSession(reason = "complete") {
   stopListening();
   stopCoachAudio();
 
-  const elapsedMins = Math.max(1, Math.round((DEFAULT_SESSION_SECS - secsLeft) / 60));
+  const elapsedMins = Math.max(1, Math.round((selectedDurationMins * 60 - secsLeft) / 60));
 
   await callTool("save_progress", {
     sessions_completed: 1,
@@ -1459,6 +1510,7 @@ async function main() {
     soundLabel.textContent = audioEnabled ? "Audio ON" : "Audio OFF";
     if (!audioEnabled) stopCoachAudio();
   });
+  handsfreeToggleBtn?.addEventListener("click", () => toggleHandsFree());
 
   retryMicBtn?.addEventListener("click", () => {
     hideSpeechDiagnostic();

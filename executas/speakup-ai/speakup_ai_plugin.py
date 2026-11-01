@@ -318,6 +318,65 @@ EXACT_CORRECTIONS = {
     },
 }
 
+# High-frequency learner corrections are intentionally local and deterministic.
+# The model layer can improve wording, but it must not be required for these
+# unambiguous repairs.
+COMMON_CORRECTIONS = {
+    "hello": ("Hello.", "Sentence mechanics", "Capitalize the sentence and add ending punctuation."),
+    "i am": ("I am.", "Sentence mechanics", "Capitalize the pronoun I and add ending punctuation."),
+    "hello there": ("Hello there.", "Sentence mechanics", "Capitalize the sentence and add ending punctuation."),
+    "good morning": ("Good morning.", "Sentence mechanics", "Capitalize the greeting and add ending punctuation."),
+    "how are you": ("How are you?", "Sentence mechanics", "Questions need a question mark."),
+    "what is your name": ("What is your name?", "Sentence mechanics", "Questions need a question mark."),
+    "where are you from": ("Where are you from?", "Sentence mechanics", "Questions need a question mark."),
+    "i like reading": ("I like reading.", "Sentence mechanics", "Capitalize the pronoun I and add ending punctuation."),
+    "i am a student": ("I am a student.", "Sentence mechanics", "Capitalize the pronoun I and add ending punctuation."),
+    "this is my book": ("This is my book.", "Sentence mechanics", "Capitalize the sentence and add ending punctuation."),
+    "hello  there": ("Hello there.", "Spacing", "Use one space between words."),
+    "i  am  ready": ("I am ready.", "Spacing", "Use one space between words."),
+    "hello , how are you": ("Hello, how are you?", "Punctuation", "Place the comma next to the greeting and use a question mark."),
+    "i like tea .": ("I like tea.", "Punctuation", "Place punctuation directly after the final word."),
+    "how are you ?": ("How are you?", "Punctuation", "Place the question mark directly after the final word."),
+    "i dont know": ("I don't know.", "Contractions", "Use the contraction don't for do not."),
+    "i cant go": ("I can't go.", "Contractions", "Use the contraction can't for cannot."),
+    "she doesnt understand": ("She doesn't understand.", "Contractions", "Third-person singular uses doesn't."),
+    "we arent late": ("We aren't late.", "Contractions", "Use the contraction aren't for are not."),
+    "theyre working": ("They're working.", "Contractions", "Use they're for they are."),
+    "speal": ("Speak.", "Spelling", "The correct spelling is speak."),
+    "exiting": ("Exciting.", "Word choice", "Exciting describes something that creates enthusiasm; exiting means leaving."),
+    "recieve": ("Receive.", "Spelling", "The correct spelling is receive."),
+    "becuase": ("Because.", "Spelling", "The correct spelling is because."),
+    "definately": ("Definitely.", "Spelling", "The correct spelling is definitely."),
+    "enviroment": ("Environment.", "Spelling", "The correct spelling is environment."),
+    "teh answer": ("The answer.", "Spelling", "The correct spelling is the."),
+    "i realy like it": ("I really like it.", "Spelling", "The correct spelling is really."),
+    "how do are doing": ("How are you doing?", "Sentence structure", "Questions in the present continuous use how are you doing."),
+    "i has a car": ("I have a car.", "Subject-verb agreement", "Use have with I."),
+    "we is students": ("We are students.", "Subject-verb agreement", "Use are with we."),
+    "she walk to work": ("She walks to work.", "Subject-verb agreement", "Third-person singular verbs take -s."),
+    "he play football": ("He plays football.", "Subject-verb agreement", "Third-person singular verbs take -s."),
+    "yesterday i go to class": ("Yesterday I went to class.", "Past tense", "Yesterday requires the past-tense form went."),
+    "last week she visit us": ("Last week she visited us.", "Past tense", "Last week requires a past-tense verb."),
+    "i am engineer": ("I am an engineer.", "Article usage", "Use an before a vowel sound."),
+    "she is doctor": ("She is a doctor.", "Article usage", "Singular professions need a or an."),
+    "he is student": ("He is a student.", "Article usage", "Singular professions need a or an."),
+    "i want go home": ("I want to go home.", "Infinitive", "Want is followed by to and the base verb."),
+    "i enjoy to read": ("I enjoy reading.", "Gerund", "Enjoy is followed by a gerund."),
+    "very much people like music": ("Very many people like music.", "Word choice", "Use many with countable people."),
+    "i am good in english": ("I am good at English.", "Preposition", "The natural preposition is good at."),
+    "depend of the weather": ("Depend on the weather.", "Preposition", "The verb depend takes on."),
+    "discuss about the problem": ("Discuss the problem.", "Preposition", "Discuss does not take about."),
+    "explain me this": ("Explain this to me.", "Word order", "Use explain something to someone."),
+    "i look forward to meet you": ("I look forward to meeting you.", "Gerund", "Look forward to is followed by a gerund."),
+    "can you suggest me a topic": ("Can you suggest a topic to me?", "Word order", "Use suggest something to someone."),
+    "what topic we can speak": ("What topic can we speak about?", "Question structure", "Questions place the modal before the subject."),
+    "she can sings well": ("She can sing well.", "Modal verb", "A modal is followed by the base verb."),
+    "i am agree with you": ("I agree with you.", "Word choice", "Agree is a verb and does not use am."),
+    "i did not went there": ("I did not go there.", "Past tense", "Did not is followed by the base verb."),
+    "this informations are useful": ("This information is useful.", "Noun agreement", "Information is uncountable and takes is."),
+    "the people is friendly": ("The people are friendly.", "Subject-verb agreement", "People takes the plural verb are."),
+}
+
 
 def correct_sentence(text: str, is_speech: bool = False) -> dict:
     """
@@ -352,12 +411,69 @@ def correct_sentence(text: str, is_speech: bool = False) -> dict:
             "better_expressions": spec["better_expressions"],
         }
 
+    if lowered in COMMON_CORRECTIONS:
+        corrected_value, category, explanation = COMMON_CORRECTIONS[lowered]
+        if is_speech and category in {"Sentence mechanics", "Punctuation", "Spacing"}:
+            return {
+                "original": raw,
+                "corrected": corrected_value,
+                "explanation": "Your speech was clear; capitalization and punctuation were formatted automatically.",
+                "category": "Clear expression",
+                "isCorrect": True,
+                "label": "Basic mode (rule-based)",
+                "better_expressions": [],
+            }
+        return {
+            "original": raw,
+            "corrected": corrected_value,
+            "explanation": explanation,
+            "category": category,
+            "isCorrect": False,
+            "label": "Basic mode (rule-based)",
+            "better_expressions": [corrected_value],
+        }
+
     # 2. Rule-based substitutions
     corrected = raw
     category = None
     explanation = None
 
     replacements = [
+        (r"\s+", " ", "Spacing", "Use one space between words."),
+        (r"\s+([,.!?])", r"\1", "Punctuation", "Place punctuation directly after the preceding word."),
+        (r"\b(dont)\b", "don't", "Contractions", "Use the contraction don't for do not."),
+        (r"\b(cant)\b", "can't", "Contractions", "Use the contraction can't for cannot."),
+        (r"\b(doesnt)\b", "doesn't", "Contractions", "Use the contraction doesn't for does not."),
+        (r"\b(arent)\b", "aren't", "Contractions", "Use the contraction aren't for are not."),
+        (r"\b(theyre)\b", "they're", "Contractions", "Use they're for they are."),
+        (r"\bspeal\b", "speak", "Spelling", "The correct spelling is speak."),
+        (r"\bexiting\b", "exciting", "Word choice", "Exciting describes enthusiasm; exiting means leaving."),
+        (r"\brecieve\b", "receive", "Spelling", "The correct spelling is receive."),
+        (r"\bbecuase\b", "because", "Spelling", "The correct spelling is because."),
+        (r"\bdefinately\b", "definitely", "Spelling", "The correct spelling is definitely."),
+        (r"\benviroment\b", "environment", "Spelling", "The correct spelling is environment."),
+        (r"\bteh\b", "the", "Spelling", "The correct spelling is the."),
+        (r"\brealy\b", "really", "Spelling", "The correct spelling is really."),
+        (r"\b(he|she)\s+go\s+yesterday\b", r"\1 went yesterday", "Past tense", "Yesterday requires the past-tense form went."),
+        (r"\b(he|she)\s+go\b", r"\1 goes", "Subject-verb agreement", "Third-person singular verbs take -s."),
+        (r"\b(he|she)\s+play\b", r"\1 plays", "Subject-verb agreement", "Third-person singular verbs take -s."),
+        (r"\b(i)\s+has\b", "I have", "Subject-verb agreement", "Use have with I."),
+        (r"\b(we)\s+is\b", r"\1 are", "Subject-verb agreement", "Use are with we."),
+        (r"\b(i)\s+am\s+(engineer|artist|architect)\b", r"I am an \2", "Article usage", "Use an before a vowel sound."),
+        (r"\b(she|he)\s+is\s+(doctor|student|engineer)\b", r"\1 is a \2", "Article usage", "Singular professions need a or an."),
+        (r"\bi\s+want\s+go\b", "I want to go", "Infinitive", "Want is followed by to and the base verb."),
+        (r"\bi\s+enjoy\s+to\s+(\w+)\b", r"I enjoy \1ing", "Gerund", "Enjoy is followed by a gerund."),
+        (r"\bvery much people\b", "very many people", "Word choice", "Use many with countable people."),
+        (r"\bgood in\b", "good at", "Preposition", "The natural preposition is good at."),
+        (r"\bdepend of\b", "depend on", "Preposition", "The verb depend takes on."),
+        (r"\bdiscuss about\b", "discuss", "Preposition", "Discuss does not take about."),
+        (r"\bexplain me\b", "explain this to me", "Word order", "Use explain something to someone."),
+        (r"\bi look forward to meet\b", "I look forward to meeting", "Gerund", "Look forward to is followed by a gerund."),
+        (r"\bshe can sings\b", "She can sing", "Modal verb", "A modal is followed by the base verb."),
+        (r"\bi am agree\b", "I agree", "Word choice", "Agree is a verb and does not use am."),
+        (r"\bi did not went\b", "I did not go", "Past tense", "Did not is followed by the base verb."),
+        (r"\bthis informations are\b", "This information is", "Noun agreement", "Information is uncountable and takes is."),
+        (r"\bthe people is\b", "The people are", "Subject-verb agreement", "People takes the plural verb are."),
         # Subject-verb agreement
         (r"\b(i)\s+is\b", "I am", "Subject-verb agreement", "Use 'am' with the subject pronoun 'I'."),
         (r"\b(i)\s+are\b", "I am", "Subject-verb agreement", "Use 'am' with the subject pronoun 'I'."),
@@ -505,7 +621,7 @@ def fallback_contextual_turn(user_input: str, scenario_key: str, turn_number: in
 
     # 4. User asked a direct question
     if "?" in user_input or lower.startswith(("what is", "how do you", "why do", "can you")):
-        reply = f"That is a great conversational question! In a {scenario['title']} setting, sharing curious perspectives keeps dialogue engaging."
+        reply = f"You asked, “{user_input.strip()}” Let’s use that question as the focus of this {scenario['title']} practice."
         stage_idx = (max(turn_number, 1) - 1) % len(stages) if stages else 0
         follow_up = stages[stage_idx]["question"] if stages else "What is your own take on that question?"
         return reply, follow_up, []
@@ -638,10 +754,22 @@ def _parse_coach_json(raw_text: str) -> dict | None:
     if not isinstance(topics, list):
         topics = []
 
+    correction = data.get("correction")
+    if correction is None and any(key in data for key in ("corrected", "errors", "isCorrect")):
+        correction = {
+            "original": data.get("original", ""),
+            "corrected": data.get("corrected", ""),
+            "naturalAlternative": data.get("naturalAlternative", ""),
+            "errors": data.get("errors", []),
+            "isCorrect": data.get("isCorrect", False),
+        }
+    if correction is not None and not isinstance(correction, dict):
+        correction = None
     return {
         "reply": reply.strip(),
         "follow_up": follow_up.strip(),
         "suggested_topics": [str(t) for t in topics[:4]],
+        "correction": correction,
     }
 
 
@@ -843,7 +971,9 @@ def tool_coach_turn(args: dict, ctx: dict, invoke_id: str) -> dict:
             "Acknowledge what the learner said in 1-2 supportive sentences (coach_reply), "
             "and then ask ONE natural follow-up question (follow_up) that continues the scenario. "
             "CRITICAL: Do not repeat the question inside coach_reply. "
-            "Return valid JSON ONLY with keys: 'reply', 'follow_up', 'suggested_topics'. "
+            "Return valid JSON ONLY with keys: 'original', 'corrected', 'naturalAlternative', 'errors', 'isCorrect', 'reply', 'followUp', 'suggested_topics'. "
+            "The errors array contains objects with type, wrong, right, and explanation. "
+            "If the learner is already correct, errors must be empty and isCorrect must be true. "
             f"Scenario: {scenario['title']}. Conversation history: {json.dumps(recent_history)}. "
             f"Learner response: {user_input!r}"
         )
@@ -856,6 +986,17 @@ def tool_coach_turn(args: dict, ctx: dict, invoke_id: str) -> dict:
             follow_up = parsed["follow_up"]
             suggested_topics = parsed.get("suggested_topics", [])
             source = "ai"
+            model_correction = parsed.get("correction")
+            if isinstance(model_correction, dict):
+                correction = {
+                    **correction,
+                    "original": model_correction.get("original", correction["original"]),
+                    "corrected": model_correction.get("corrected", correction["corrected"]),
+                    "naturalAlternative": model_correction.get("naturalAlternative", correction.get("better_expressions", [""])[0] if correction.get("better_expressions") else correction["corrected"]),
+                    "errors": model_correction.get("errors", []),
+                    "isCorrect": bool(model_correction.get("isCorrect", correction["isCorrect"])),
+                    "label": "AI",
+                }
 
     # If sampling was not used or failed, use deterministic contextual fallback
     if not coach_reply:
@@ -864,6 +1005,16 @@ def tool_coach_turn(args: dict, ctx: dict, invoke_id: str) -> dict:
 
     # 4. Guarantee zero sentence duplication
     clean_reply, clean_follow_up, full_message = deduplicate_sentences(coach_reply, follow_up)
+    alternatives = correction.get("better_expressions") or [correction["corrected"]]
+    correction.setdefault("naturalAlternative", alternatives[0])
+    correction.setdefault("errors", [] if correction["isCorrect"] else [{
+        "type": correction["category"],
+        "wrong": correction["original"],
+        "right": correction["corrected"],
+        "explanation": correction["explanation"],
+    }])
+    correction["reply"] = clean_reply
+    correction["followUp"] = clean_follow_up
 
     return {
         "success": True,
@@ -1066,7 +1217,7 @@ TOOL_MAP = {
 
 MANIFEST = {
     "name": TOOL_ID,
-    "version": "0.3.1",
+    "version": "0.3.2",
     "host_capabilities": ["llm.sample", "aps.kv"],
     "tools": [
         {
@@ -1188,7 +1339,7 @@ def handle_request(req: dict) -> None:
                 "id": rid,
                 "result": {
                     "protocolVersion": PROTOCOL_VERSION,
-                    "serverInfo": {"name": TOOL_ID, "version": "0.3.1"},
+                    "serverInfo": {"name": TOOL_ID, "version": "0.3.2"},
                     "capabilities": {"sampling": {}, "storage": {}},
                 },
             })

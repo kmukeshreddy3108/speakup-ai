@@ -1,10 +1,12 @@
 {
   "slug": "speakup-ai",
   "name": "SpeakUp AI Coach",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "executa_type": "tool",
+  "tool_id": "tool-dev-speakup-ai",
+  "type": "python",
   "distribution": {
-    "active": "local",
+    "active": "binary",
     "profiles": {
       "local": {
         "type": "local",
