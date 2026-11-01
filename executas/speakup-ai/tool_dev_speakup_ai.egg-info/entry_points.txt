@@ -1,2 +1,0 @@
-[console_scripts]
-tool-dev-speakup-ai = speakup_ai_plugin:main

@@ -1,0 +1,208 @@
+name: Build and Release Executa Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version string (e.g. 0.3.1)"
+        required: true
+        default: "0.3.1"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+            archive_ext: tar.gz
+            bin_name: tool-dev-speakup-ai
+          - os: macos-15-intel
+            platform: darwin-x86_64
+            archive_ext: tar.gz
+            bin_name: tool-dev-speakup-ai
+          - os: macos-15
+            platform: darwin-arm64
+            archive_ext: tar.gz
+            bin_name: tool-dev-speakup-ai
+          - os: windows-2022
+            platform: windows-x86_64
+            archive_ext: zip
+            bin_name: tool-dev-speakup-ai.exe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Determine version
+        id: vars
+        shell: bash
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${GITHUB_REF#refs/tags/v}"
+            echo "version=${TAG}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate version consistency
+        shell: bash
+        run: |
+          set -e
+          VERSION="${{ steps.vars.outputs.version }}"
+          EXECUTA_VER=$(python -c "import json; print(json.load(open('executas/speakup-ai/executa.json'))['version'])")
+          PYPROJECT_VER=$(python -c "
+          try:
+              import tomllib
+          except ImportError:
+              import tomli as tomllib
+          with open('executas/speakup-ai/pyproject.toml','rb') as f:
+              print(tomllib.load(f)['project']['version'])
+          ")
+          echo "Workflow version: ${VERSION}"
+          echo "executa.json version: ${EXECUTA_VER}"
+          echo "pyproject.toml version: ${PYPROJECT_VER}"
+          if [ "${VERSION}" != "${EXECUTA_VER}" ]; then
+            echo "ERROR: Workflow version (${VERSION}) does not match executa.json (${EXECUTA_VER})"
+            exit 1
+          fi
+          if [ "${VERSION}" != "${PYPROJECT_VER}" ]; then
+            echo "ERROR: Workflow version (${VERSION}) does not match pyproject.toml (${PYPROJECT_VER})"
+            exit 1
+          fi
+          echo "All versions match: ${VERSION}"
+
+      - name: Install PyInstaller and dependencies
+        shell: bash
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          cd executas/speakup-ai
+          pip install -e .
+
+      - name: Build binary with PyInstaller
+        shell: bash
+        run: |
+          set -e
+          cd executas/speakup-ai
+          pyinstaller --onefile --name ${{ matrix.bin_name }} speakup_ai_plugin.py
+
+      - name: Verify binary architecture (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -e
+          BINARY="executas/speakup-ai/dist/${{ matrix.bin_name }}"
+          echo "Binary file info:"
+          file "${BINARY}"
+          FILE_INFO=$(file "${BINARY}")
+          PLATFORM="${{ matrix.platform }}"
+          if [ "${PLATFORM}" = "darwin-arm64" ]; then
+            if ! echo "${FILE_INFO}" | grep -qi "arm64"; then
+              echo "ERROR: Expected arm64 binary but got: ${FILE_INFO}"
+              exit 1
+            fi
+          elif [ "${PLATFORM}" = "darwin-x86_64" ]; then
+            if ! echo "${FILE_INFO}" | grep -qi "x86_64"; then
+              echo "ERROR: Expected x86_64 binary but got: ${FILE_INFO}"
+              exit 1
+            fi
+          elif [ "${PLATFORM}" = "linux-x86_64" ]; then
+            if ! echo "${FILE_INFO}" | grep -qi "x86-64\|x86_64\|AMD64"; then
+              echo "ERROR: Expected x86_64 binary but got: ${FILE_INFO}"
+              exit 1
+            fi
+          fi
+          echo "Architecture verified for ${PLATFORM}"
+
+      - name: Package archive (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          set -e
+          VERSION="${{ steps.vars.outputs.version }}"
+          ARCHIVE="speakup-ai-${VERSION}-${{ matrix.platform }}.tar.gz"
+          mkdir -p package_root/bin
+          cp executas/speakup-ai/dist/${{ matrix.bin_name }} package_root/bin/
+          chmod +x package_root/bin/${{ matrix.bin_name }}
+          tar -czvf "${ARCHIVE}" -C package_root bin
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          mkdir -p artifacts
+          mv "${ARCHIVE}" "${ARCHIVE}.sha256" artifacts/
+
+      - name: Package archive (Windows)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $VERSION = "${{ steps.vars.outputs.version }}"
+          $ARCHIVE = "speakup-ai-${VERSION}-${{ matrix.platform }}.zip"
+          New-Item -ItemType Directory -Path package_root\bin -Force | Out-Null
+          Copy-Item executas\speakup-ai\dist\${{ matrix.bin_name }} package_root\bin\
+          Compress-Archive -Path package_root\bin -DestinationPath $ARCHIVE -Force
+          $hash = (Get-FileHash -Path $ARCHIVE -Algorithm SHA256).Hash.ToLower()
+          "$hash  $ARCHIVE" | Out-File -FilePath "${ARCHIVE}.sha256" -Encoding ascii
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          Move-Item $ARCHIVE artifacts/
+          Move-Item "${ARCHIVE}.sha256" artifacts/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-archive
+          path: artifacts/*
+          if-no-files-found: error
+
+  release:
+    name: Create Release and Upload Assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${GITHUB_REF#refs/tags/v}"
+            echo "version=${TAG}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all_artifacts
+          merge-multiple: true
+
+      - name: List release assets
+        run: |
+          echo "Release assets:"
+          ls -la all_artifacts/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.vars.outputs.version }}"
+          name: "SpeakUp AI Executa v${{ steps.vars.outputs.version }}"
+          files: all_artifacts/*
+          draft: false
+          prerelease: false
