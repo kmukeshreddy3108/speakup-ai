@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tool-dev-speakup-ai"
-version = "0.3.1"
+version = "0.3.2"
 description = "Executa for the speakup-ai Anna App"
 requires-python = ">=3.10"
 

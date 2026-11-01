@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set VERSION=0.3.1
+set VERSION=0.3.2
 set DIST_DIR=executas\speakup-ai\dist\speakup-ai\%VERSION%
 
 echo.

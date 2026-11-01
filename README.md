@@ -69,15 +69,15 @@ Open `http://localhost:5180/` in Google Chrome or Microsoft Edge.
 > **Note:** Publishing to Anna and submitting for review are manual steps performed by the developer.
 
 1. **Build Cross-Platform Binaries:**
-   Push a version tag (e.g. `v0.3.1`) or trigger the GitHub Actions workflow manually via **Run workflow** (`workflow_dispatch`) in the Actions tab. The workflow builds:
-   - `speakup-ai-0.3.1-darwin-arm64.tar.gz`
-   - `speakup-ai-0.3.1-darwin-x86_64.tar.gz`
-   - `speakup-ai-0.3.1-linux-x86_64.tar.gz` (Critical for Anna Cloud Agents)
-   - `speakup-ai-0.3.1-windows-x86_64.zip`
+   Push a version tag (e.g. `v0.3.2`) or trigger the GitHub Actions workflow manually via **Run workflow** (`workflow_dispatch`) in the Actions tab. The workflow builds:
+   - `speakup-ai-0.3.2-darwin-arm64.tar.gz`
+   - `speakup-ai-0.3.2-darwin-x86_64.tar.gz`
+   - `speakup-ai-0.3.2-linux-x86_64.tar.gz` (Critical for Anna Cloud Agents)
+   - `speakup-ai-0.3.2-windows-x86_64.zip`
 2. **Download Archives:**
    Place the 4 downloaded archives and their corresponding `.sha256` files into:
    ```
-   executas/speakup-ai/dist/speakup-ai/0.3.1/
+   executas/speakup-ai/dist/speakup-ai/0.3.2/
    ```
 3. **Switch to Binary Distribution:**
    In `executas/speakup-ai/executa.json`, change `"active": "local"` to `"active": "binary"`.
