@@ -165,6 +165,16 @@ def test_malformed_coach_json_is_rejected():
     assert parsed["follow_up"] == "What next?"
 
 
+def test_coach_json_includes_strict_correction_payload():
+    parsed = plugin._parse_coach_json(
+        '{"original":"hello","corrected":"Hello.","naturalAlternative":"Hi there.",'
+        '"errors":[{"type":"capitalization","wrong":"hello","right":"Hello.","explanation":"Start with a capital."}],'
+        '"isCorrect":false,"reply":"You greeted me clearly.","followUp":"Where are you from?"}'
+    )
+    assert parsed["correction"]["corrected"] == "Hello."
+    assert parsed["correction"]["errors"][0]["right"] == "Hello."
+
+
 def test_coach_turn_uses_rule_based_fallback_when_sampling_unavailable():
     original = plugin._sampling_available
     plugin._sampling_available = False

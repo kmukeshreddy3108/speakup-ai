@@ -58,6 +58,7 @@ let autoListenAfterCoach = true;
 let handsFreeEnabled = false;
 let recognitionRetryCount = 0;
 let recognitionRetryTimer = null;
+let speechRate = 1;
 
 // Notebook & Progress
 let notebookEntries      = [];
@@ -417,7 +418,7 @@ function speakCoachPrompt(text, onComplete) {
 
   const utterance = new SpeechSynthesisUtterance(clean);
   utterance.lang = "en-US";
-  utterance.rate = 0.95;
+  utterance.rate = speechRate;
 
   const voices = window.speechSynthesis.getVoices();
   const enVoice =
@@ -619,7 +620,9 @@ async function startListening() {
       isListening = false;
       if (voiceState === "listening") {
         if (recognizedText.trim()) {
-          if (handsFreeEnabled && !isPaused && !isSubmitting) {
+          if (handleVoiceCommand(recognizedText)) {
+            setVoiceState("ready", "Command accepted");
+          } else if (handsFreeEnabled && !isPaused && !isSubmitting) {
             setVoiceState("processing", "Speech captured · Sending…");
             submitTurn(recognizedText);
           } else {
@@ -669,6 +672,21 @@ function stopListening() {
   isListening = false;
   if (recognition) {
     try { recognition.stop(); } catch {}
+  }
+
+  function handleVoiceCommand(text) {
+    const command = text.trim().toLowerCase();
+    if (command === "pause") { if (!isPaused) togglePauseSession(); return true; }
+    if (command === "resume") { if (isPaused) togglePauseSession(); return true; }
+    if (command === "repeat") { replayCoachPrompt(); return true; }
+    if (command === "say it slower") { speechRate = 0.75; replayCoachPrompt(); return true; }
+    if (command === "faster") { speechRate = 1.25; replayCoachPrompt(); return true; }
+    if (command === "correct me") { autoListenAfterCoach = true; toast("Corrections are on.", "info"); return true; }
+    if (command === "don't correct me" || command === "dont correct me") { toast("Corrections remain in your notebook; spoken corrections are off.", "info"); return true; }
+    if (command === "what did i do wrong") { tabNotebook?.click(); return true; }
+    if (command === "end session") { endSession("manual"); return true; }
+    if (command.startsWith("change topic to ")) { toast(`Topic requested: ${text.slice(16)}`, "info"); return false; }
+    return false;
   }
   if (voiceState === "listening" || voiceState === "requesting") {
     setVoiceState("ready");
@@ -1068,7 +1086,7 @@ async function startSession() {
   turnNumber  = 1;
 
   convTitle.textContent    = d.scenario_title || "Practice Session";
-  convSubtitle.textContent = "Turn 1";
+  convSubtitle.textContent = `Turn 1 · ${d.source === "ai" ? "AI coach" : "Basic mode: AI unavailable"}`;
 
   updateCoachLabel(d.source || "rules");
   recognitionRetryCount = 0;
