@@ -208,3 +208,21 @@ def test_start_session_contract():
     assert result["data"]["total_turns"] is None
     assert result["data"]["source"] in ("ai", "rules")
     assert result["data"]["opening_prompt"]
+
+
+def test_fallback_answers_user_question_without_generic_praise():
+    original = plugin._sampling_available
+    plugin._sampling_available = False
+    try:
+        result = plugin.tool_coach_turn(
+            {"user_input": "What topic can we discuss?", "scenario_key": "everyday",
+             "turn_number": 1, "session_id": "test-session", "input_mode": "typed"},
+            {}, "test-invoke",
+        )
+    finally:
+        plugin._sampling_available = original
+    data = result["data"]
+    assert "great conversational question" not in data["full_message"].lower()
+    assert "topic" in data["follow_up"].lower()
+    assert data["correction"]["errors"] == []
+    assert data["correction"]["naturalAlternative"]

@@ -621,7 +621,7 @@ def fallback_contextual_turn(user_input: str, scenario_key: str, turn_number: in
 
     # 4. User asked a direct question
     if "?" in user_input or lower.startswith(("what is", "how do you", "why do", "can you")):
-        reply = f"That is a great conversational question! In a {scenario['title']} setting, sharing curious perspectives keeps dialogue engaging."
+        reply = f"You asked, “{user_input.strip()}” Let’s use that question as the focus of this {scenario['title']} practice."
         stage_idx = (max(turn_number, 1) - 1) % len(stages) if stages else 0
         follow_up = stages[stage_idx]["question"] if stages else "What is your own take on that question?"
         return reply, follow_up, []
@@ -754,10 +754,22 @@ def _parse_coach_json(raw_text: str) -> dict | None:
     if not isinstance(topics, list):
         topics = []
 
+    correction = data.get("correction")
+    if correction is None and any(key in data for key in ("corrected", "errors", "isCorrect")):
+        correction = {
+            "original": data.get("original", ""),
+            "corrected": data.get("corrected", ""),
+            "naturalAlternative": data.get("naturalAlternative", ""),
+            "errors": data.get("errors", []),
+            "isCorrect": data.get("isCorrect", False),
+        }
+    if correction is not None and not isinstance(correction, dict):
+        correction = None
     return {
         "reply": reply.strip(),
         "follow_up": follow_up.strip(),
         "suggested_topics": [str(t) for t in topics[:4]],
+        "correction": correction,
     }
 
 
@@ -959,7 +971,9 @@ def tool_coach_turn(args: dict, ctx: dict, invoke_id: str) -> dict:
             "Acknowledge what the learner said in 1-2 supportive sentences (coach_reply), "
             "and then ask ONE natural follow-up question (follow_up) that continues the scenario. "
             "CRITICAL: Do not repeat the question inside coach_reply. "
-            "Return valid JSON ONLY with keys: 'reply', 'follow_up', 'suggested_topics'. "
+            "Return valid JSON ONLY with keys: 'original', 'corrected', 'naturalAlternative', 'errors', 'isCorrect', 'reply', 'followUp', 'suggested_topics'. "
+            "The errors array contains objects with type, wrong, right, and explanation. "
+            "If the learner is already correct, errors must be empty and isCorrect must be true. "
             f"Scenario: {scenario['title']}. Conversation history: {json.dumps(recent_history)}. "
             f"Learner response: {user_input!r}"
         )
@@ -972,6 +986,17 @@ def tool_coach_turn(args: dict, ctx: dict, invoke_id: str) -> dict:
             follow_up = parsed["follow_up"]
             suggested_topics = parsed.get("suggested_topics", [])
             source = "ai"
+            model_correction = parsed.get("correction")
+            if isinstance(model_correction, dict):
+                correction = {
+                    **correction,
+                    "original": model_correction.get("original", correction["original"]),
+                    "corrected": model_correction.get("corrected", correction["corrected"]),
+                    "naturalAlternative": model_correction.get("naturalAlternative", correction.get("better_expressions", [""])[0] if correction.get("better_expressions") else correction["corrected"]),
+                    "errors": model_correction.get("errors", []),
+                    "isCorrect": bool(model_correction.get("isCorrect", correction["isCorrect"])),
+                    "label": "AI",
+                }
 
     # If sampling was not used or failed, use deterministic contextual fallback
     if not coach_reply:
@@ -980,6 +1005,16 @@ def tool_coach_turn(args: dict, ctx: dict, invoke_id: str) -> dict:
 
     # 4. Guarantee zero sentence duplication
     clean_reply, clean_follow_up, full_message = deduplicate_sentences(coach_reply, follow_up)
+    alternatives = correction.get("better_expressions") or [correction["corrected"]]
+    correction.setdefault("naturalAlternative", alternatives[0])
+    correction.setdefault("errors", [] if correction["isCorrect"] else [{
+        "type": correction["category"],
+        "wrong": correction["original"],
+        "right": correction["corrected"],
+        "explanation": correction["explanation"],
+    }])
+    correction["reply"] = clean_reply
+    correction["followUp"] = clean_follow_up
 
     return {
         "success": True,
