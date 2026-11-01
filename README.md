@@ -51,7 +51,7 @@ anna-app whoami    # verify active login against https://anna.partners
 ## 4. Running & Validating Locally
 
 ```bash
-# 1. Validate App Manifest and schema
+# 1. Validate App Manifest and schema strictly
 anna-app validate --strict
 
 # 2. Run Python Executa unit tests
@@ -72,14 +72,31 @@ Open `http://localhost:5180/` in Google Chrome or Microsoft Edge.
 > **Note:** Publishing to Anna and submitting for review are manual steps performed by the developer.
 
 1. **Build Cross-Platform Binaries:**
-   Push a version tag (e.g., `v0.3.0`) to trigger the GitHub Actions workflow (`.github/workflows/build-binaries.yml`), which builds standalone packages for:
-   - `darwin-arm64` (.tar.gz)
-   - `darwin-x86_64` (.tar.gz)
-   - `linux-x86_64` (.tar.gz) — **Essential for Anna Cloud Agents**
-   - `windows-x86_64` (.zip)
-2. **Download Archives:** Place the generated archives and `.sha256` checksums into `executas/speakup-ai/dist/speakup-ai/0.3.0/`.
-3. **Verify Strict Validation:** Run `anna-app validate --strict`.
-4. **Publish to Anna:** Run `anna-app apps publish`.
+   Push a version tag (e.g. `v0.3.0`) or trigger the GitHub Actions workflow manually via **Run workflow** (`workflow_dispatch`) in the Actions tab. The workflow builds:
+   - `speakup-ai-0.3.0-darwin-arm64.tar.gz`
+   - `speakup-ai-0.3.0-darwin-x86_64.tar.gz`
+   - `speakup-ai-0.3.0-linux-x86_64.tar.gz` (Critical for Anna Cloud Agents)
+   - `speakup-ai-0.3.0-windows-x86_64.zip`
+2. **Download Archives:**
+   Place the 4 downloaded archives and their corresponding `.sha256` files into:
+   ```
+   executas/speakup-ai/dist/speakup-ai/0.3.0/
+   ```
+3. **Switch to Binary Distribution:**
+   In `executas/speakup-ai/executa.json`, change `"active": "local"` to `"active": "binary"`.
+4. **Verify Strict Validation:**
+   ```bash
+   anna-app validate --strict
+   ```
+5. **Publish to Anna Platform:**
+   ```bash
+   anna-app apps publish
+   ```
+6. **Submit for Review:**
+   ```bash
+   anna-app apps submit-review speakup-ai
+   ```
+   *(Alternatively, submit via the Anna Developer portal at https://anna.partners/developers)*
 
 ---
 
