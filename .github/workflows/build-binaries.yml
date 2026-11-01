@@ -1,0 +1,142 @@
+name: Build and Release Executa Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version string (e.g. 0.3.0)"
+        required: true
+        default: "0.3.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+            archive_ext: tar.gz
+            bin_name: tool-dev-speakup-ai
+          - os: macos-13
+            platform: darwin-x86_64
+            archive_ext: tar.gz
+            bin_name: tool-dev-speakup-ai
+          - os: macos-14
+            platform: darwin-arm64
+            archive_ext: tar.gz
+            bin_name: tool-dev-speakup-ai
+          - os: windows-2022
+            platform: windows-x86_64
+            archive_ext: zip
+            bin_name: tool-dev-speakup-ai.exe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Determine version
+        id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${GITHUB_REF#refs/tags/v}"
+            echo "version=${TAG}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install PyInstaller and dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          cd executas/speakup-ai
+          pip install -e .
+
+      - name: Build binary with PyInstaller
+        shell: bash
+        run: |
+          cd executas/speakup-ai
+          pyinstaller --onefile --name ${{ matrix.bin_name }} speakup_ai_plugin.py
+
+      - name: Package archive (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          ARCHIVE="speakup-ai-${VERSION}-${{ matrix.platform }}.tar.gz"
+          mkdir -p package_root/bin
+          cp executas/speakup-ai/dist/${{ matrix.bin_name }} package_root/bin/
+          chmod +x package_root/bin/${{ matrix.bin_name }}
+          tar -czvf "${ARCHIVE}" -C package_root bin
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          mkdir -p artifacts
+          mv "${ARCHIVE}" "${ARCHIVE}.sha256" artifacts/
+
+      - name: Package archive (Windows)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $VERSION = "${{ steps.vars.outputs.version }}"
+          $ARCHIVE = "speakup-ai-${VERSION}-${{ matrix.platform }}.zip"
+          New-Item -ItemType Directory -Path package_root\bin -Force | Out-Null
+          Copy-Item executas\speakup-ai\dist\${{ matrix.bin_name }} package_root\bin\
+          Compress-Archive -Path package_root\bin -DestinationPath $ARCHIVE
+          $hash = (Get-FileHash -Path $ARCHIVE -Algorithm SHA256).Hash.ToLower()
+          "$hash  $ARCHIVE" | Out-File -FilePath "${ARCHIVE}.sha256" -Encoding ascii
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          Move-Item $ARCHIVE artifacts/
+          Move-Item "${ARCHIVE}.sha256" artifacts/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-archive
+          path: artifacts/*
+
+  release:
+    name: Create Release and Upload Assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${GITHUB_REF#refs/tags/v}"
+            echo "version=${TAG}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all_artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: "SpeakUp AI Executa v${{ steps.vars.outputs.version }}"
+          files: all_artifacts/*
+          draft: false
+          prerelease: false

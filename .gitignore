@@ -1,0 +1,21 @@
+# Anna platform caches and keys
+.anna/
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS artifacts
+.DS_Store
+Thumbs.db

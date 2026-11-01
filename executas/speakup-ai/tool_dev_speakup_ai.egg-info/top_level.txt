@@ -1,1 +1,0 @@
-speakup_ai_plugin

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SpeakUp AI — English Conversation Practice Coach</title>
-    <meta name="description" content="SpeakUp AI is a voice-first English conversation practice coach. Practice speaking English in guided 10-minute sessions." />
+    <meta name="description" content="SpeakUp AI is a voice-first English conversation practice coach. Practice speaking English in guided focused sessions with honest feedback." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -17,24 +17,29 @@
         --bg-surface:  #101726;
         --bg-card:     #141e30;
         --bg-elevated: #1b2840;
-        --border:      rgba(255, 255, 255, 0.08);
+        --border:      rgba(255, 255, 255, 0.12);
         --accent:      #10b981;
         --accent-glow: rgba(16, 185, 129, 0.35);
-        --accent-soft: rgba(16, 185, 129, 0.12);
+        --accent-soft: rgba(16, 185, 129, 0.15);
         --blue:        #38bdf8;
         --purple:      #c084fc;
-        --purple-soft: rgba(192, 132, 252, 0.12);
+        --purple-soft: rgba(192, 132, 252, 0.15);
         --warn:        #f59e0b;
-        --warn-soft:   rgba(245, 158, 11, 0.12);
+        --warn-soft:   rgba(245, 158, 11, 0.15);
         --error:       #ef4444;
-        --error-soft:  rgba(239, 68, 68, 0.15);
+        --error-soft:  rgba(239, 68, 68, 0.18);
         --text:        #f8fafc;
-        --text2:       #94a3b8;
-        --text3:       #64748b;
+        --text2:       #cbd5e1;
+        --text3:       #94a3b8;
         --radius:      12px;
         --radius-sm:   6px;
         --radius-pill: 9999px;
         --transition:  150ms ease;
+        --font-base:   13px;
+      }
+
+      body.font-large {
+        --font-base: 15px;
       }
 
       html, body {
@@ -42,7 +47,7 @@
         background: var(--bg);
         color: var(--text);
         font-family: 'Inter', system-ui, -apple-system, sans-serif;
-        font-size: 13px;
+        font-size: var(--font-base);
         line-height: 1.45;
         overflow: hidden;
         -webkit-font-smoothing: antialiased;
@@ -56,10 +61,14 @@
         transition: all var(--transition);
       }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
+      button:focus-visible, input:focus-visible, textarea:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
 
       input, textarea {
         font-family: inherit;
-        font-size: 13px;
+        font-size: var(--font-base);
         color: var(--text);
         background: var(--bg-elevated);
         border: 1px solid var(--border);
@@ -69,6 +78,14 @@
         resize: none;
       }
       input:focus, textarea:focus { border-color: var(--accent); }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
 
       #app {
         display: flex;
@@ -92,7 +109,7 @@
         overflow-y: auto;
       }
       .home-header {
-        padding: 24px 24px 0;
+        padding: 20px 24px 0;
         display: flex;
         align-items: center;
         gap: 12px;
@@ -105,13 +122,28 @@
         font-size: 20px;
         box-shadow: 0 0 20px var(--accent-glow);
       }
+      .home-title { flex: 1; }
       .home-title h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.3px; }
       .home-title p  { font-size: 12px; color: var(--text2); }
+
+      .home-header-actions { display: flex; align-items: center; gap: 8px; }
+      .btn-icon-subtle {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text2);
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .btn-icon-subtle:hover { color: var(--text); border-color: var(--accent); }
 
       .home-stats {
         display: flex;
         gap: 10px;
-        padding: 16px 24px 0;
+        padding: 14px 24px 0;
       }
       .stat-card {
         background: var(--bg-card);
@@ -153,7 +185,7 @@
       }
       .scenario-card.selected {
         border-color: var(--accent);
-        background: linear-gradient(135deg, rgba(16,185,129,.12), transparent);
+        background: linear-gradient(135deg, rgba(16,185,129,.14), transparent);
         box-shadow: 0 0 0 2px var(--accent-glow);
       }
       .scenario-icon { font-size: 20px; }
@@ -162,7 +194,7 @@
       .scenario-turns { font-size: 10px; color: var(--text3); margin-top: 2px; }
 
       .home-cta {
-        padding: 18px 24px 20px;
+        padding: 16px 24px 20px;
         display: flex;
         flex-direction: column;
         gap: 8px;
@@ -194,323 +226,273 @@
       }
       .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text3); }
 
+      /* Duration Selector on Home */
+      .duration-selector {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: center;
+        margin-top: 4px;
+        flex-wrap: wrap;
+      }
+      .duration-pill {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text2);
+        padding: 5px 12px;
+        border-radius: var(--radius-pill);
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all var(--transition);
+      }
+      .duration-pill:hover { border-color: var(--accent); color: var(--text); }
+      .duration-pill.selected {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .custom-duration-input {
+        width: 64px;
+        padding: 4px 8px;
+        font-size: 11px;
+        text-align: center;
+        display: none;
+      }
+      .custom-duration-input.visible { display: inline-block; }
+
       /* ─────────────────────────────────────────────────────
-         SPEAKING-FIRST PRACTICE SCREEN (ZERO-SCROLL)
+         CONVERSATION PRACTICE SCREEN
       ───────────────────────────────────────────────────── */
       #conv-screen {
         overflow: hidden;
         display: none;
         flex-direction: column;
       }
-      #conv-screen.active {
-        display: flex;
-      }
+      #conv-screen.active { display: flex; }
 
-      /* Compact Header (~48px) */
       .conv-header {
         display: flex;
         align-items: center;
-        gap: 10px;
-        padding: 8px 16px;
-        background: var(--bg-surface);
+        gap: 8px;
+        padding: 8px 14px;
         border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
         flex-shrink: 0;
-        height: 48px;
       }
       .btn-icon {
-        width: 32px; height: 32px;
         background: var(--bg-elevated);
         border: 1px solid var(--border);
+        color: var(--text);
+        width: 32px; height: 32px;
         border-radius: var(--radius-sm);
         display: flex; align-items: center; justify-content: center;
         font-size: 14px;
-        color: var(--text);
-        flex-shrink: 0;
       }
       .btn-icon:hover { border-color: var(--accent); }
-      .conv-title {
-        flex: 1;
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .conv-title h2 { font-size: 13px; font-weight: 600; }
+      .conv-title { flex: 1; }
+      .conv-title h2 { font-size: 14px; font-weight: 600; line-height: 1.2; }
       .turn-badge {
         font-size: 10px;
-        font-weight: 600;
-        background: var(--accent-soft);
         color: var(--accent);
-        padding: 2px 8px;
+        background: var(--accent-soft);
+        padding: 1px 6px;
         border-radius: var(--radius-pill);
-        border: 1px solid rgba(16,185,129,.25);
+        display: inline-block;
+        margin-top: 1px;
       }
+
+      .header-actions { display: flex; align-items: center; gap: 6px; }
       .btn-audio-ctrl {
         background: var(--bg-elevated);
         border: 1px solid var(--border);
-        color: var(--text);
-        border-radius: var(--radius-pill);
-        padding: 4px 10px;
+        color: var(--text2);
+        padding: 5px 9px;
+        border-radius: var(--radius-sm);
         font-size: 11px;
-        font-weight: 500;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        flex-shrink: 0;
-      }
-      .btn-audio-ctrl:hover { border-color: var(--blue); color: var(--blue); }
-
-      /* Compact Timer */
-      .timer-pill {
         display: flex;
         align-items: center;
         gap: 4px;
+      }
+      .btn-audio-ctrl:hover { color: var(--text); border-color: var(--accent); }
+      .btn-audio-ctrl.active { border-color: var(--warn); color: var(--warn); }
+
+      .timer-pill {
         background: var(--bg-elevated);
         border: 1px solid var(--border);
+        padding: 4px 10px;
         border-radius: var(--radius-pill);
-        padding: 3px 8px;
         font-size: 11px;
-        font-weight: 700;
-        color: var(--accent);
-        flex-shrink: 0;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 4px;
       }
-      .timer-pill.warn { color: var(--warn); border-color: var(--warn); }
+      .timer-pill.warn { border-color: var(--warn); color: var(--warn); }
+      .timer-pill.paused { border-color: var(--blue); color: var(--blue); }
 
-      /* Sleek Tab Bar (~34px) */
       .conv-tabs {
         display: flex;
-        border-bottom: 1px solid var(--border);
         background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        padding: 0 14px;
         flex-shrink: 0;
-        height: 34px;
       }
       .conv-tab {
-        flex: 1;
-        padding: 0 8px;
+        background: none;
+        color: var(--text2);
+        padding: 8px 12px;
         font-size: 11px;
         font-weight: 500;
-        color: var(--text2);
-        background: transparent;
         border-bottom: 2px solid transparent;
         display: flex;
         align-items: center;
-        justify-content: center;
-        gap: 4px;
+        gap: 5px;
       }
-      .conv-tab.active { color: var(--accent); border-color: var(--accent); }
+      .conv-tab:hover { color: var(--text); }
+      .conv-tab.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+        font-weight: 600;
+      }
       .conv-tab .badge {
-        background: var(--error); color: #fff;
-        font-size: 9px; font-weight: 700;
-        padding: 0 5px; border-radius: var(--radius-pill);
+        background: var(--warn);
+        color: #000;
+        font-size: 9px;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 9999px;
       }
 
-      /* Tab Panels Container */
-      .tab-panel {
-        display: none;
-        flex: 1;
-        overflow: hidden;
-      }
-      .tab-panel.active {
-        display: flex;
-        flex-direction: column;
-      }
+      .tab-panel { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+      .tab-panel.active { display: flex; }
 
-      /* ── PRIMARY PRACTICE STAGE (100% VISIBLE WITHOUT SCROLL) ── */
-      #panel-practice {
-        padding: 8px 12px;
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-start;
-        align-items: center;
-        gap: 8px;
-        overflow-y: auto;
-      }
-
-      /* Coach Card: Shown ONCE, compact & elegant */
+      /* Coach Card */
       .coach-card {
-        width: 100%;
-        max-width: 580px;
         background: var(--bg-card);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 8px 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
+        border-bottom: 1px solid var(--border);
+        padding: 12px 18px;
         flex-shrink: 0;
       }
       .coach-card-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
+        margin-bottom: 6px;
       }
       .coach-label {
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.05em;
         color: var(--accent);
         display: flex;
         align-items: center;
-        gap: 5px;
+        gap: 6px;
       }
-      .speaking-bars {
-        display: none;
-        align-items: center;
-        gap: 2px;
-        height: 12px;
-      }
-      .speaking-bars.active { display: inline-flex; }
+      .coach-label.rules { color: var(--blue); }
+
+      .speaking-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; }
       .speaking-bars span {
-        width: 2.5px;
-        background: var(--blue);
-        border-radius: 1px;
-        animation: wave 700ms ease-in-out infinite alternate;
+        width: 2px; height: 3px; background: currentColor; border-radius: 1px;
       }
-      .speaking-bars span:nth-child(1) { height: 5px; }
-      .speaking-bars span:nth-child(2) { height: 12px; animation-delay: 150ms; }
-      .speaking-bars span:nth-child(3) { height: 8px; animation-delay: 300ms; }
-      @keyframes wave { 0% { transform: scaleY(0.4); } 100% { transform: scaleY(1.3); } }
+      .speaking-bars.active span:nth-child(1) { animation: bar 0.5s ease-in-out infinite alternate; }
+      .speaking-bars.active span:nth-child(2) { animation: bar 0.7s ease-in-out infinite alternate 0.2s; }
+      .speaking-bars.active span:nth-child(3) { animation: bar 0.6s ease-in-out infinite alternate 0.4s; }
+      @keyframes bar { 0% { height: 3px; } 100% { height: 10px; } }
 
       .coach-audio-btn {
         background: var(--bg-elevated);
         border: 1px solid var(--border);
         color: var(--text2);
-        padding: 2px 7px;
-        border-radius: var(--radius-pill);
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
         font-size: 10px;
-        display: inline-flex;
+        font-weight: 600;
+        display: flex;
         align-items: center;
         gap: 4px;
       }
-      .coach-audio-btn:hover { color: var(--blue); border-color: var(--blue); }
+      .coach-audio-btn:hover { color: var(--text); border-color: var(--accent); }
 
       .coach-question-text {
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 600;
         line-height: 1.4;
-        color: #f1f5f9;
+        color: var(--text);
+        margin-bottom: 8px;
       }
-
-      /* Compact Tip & Vocab strip */
       .coach-footer-strip {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        gap: 10px;
         flex-wrap: wrap;
-        gap: 4px;
-        padding-top: 3px;
-        border-top: 1px solid rgba(255,255,255,0.04);
-        font-size: 10px;
       }
       .coach-hint {
-        color: var(--blue);
-        font-size: 10.5px;
+        font-size: 11px;
+        color: var(--text2);
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
         display: inline-flex;
         align-items: center;
         gap: 4px;
       }
-      .vocab-chips {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-      }
+      .vocab-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
       .vocab-pill {
         background: var(--purple-soft);
-        border: 1px solid rgba(192,132,252,0.25);
         color: var(--purple);
+        border: 1px solid rgba(192, 132, 252, 0.3);
         border-radius: var(--radius-pill);
-        padding: 1px 6px;
+        padding: 2px 8px;
         font-size: 10px;
+        font-weight: 600;
         cursor: pointer;
       }
-      .vocab-pill:hover { background: rgba(192,132,252,0.25); }
+      .vocab-pill:hover { border-color: var(--purple); }
 
-      /* ── CENTER MICROPHONE STAGE (DIRECTLY BELOW QUESTION) ── */
+      /* Speaking Stage */
       .speaking-center-stage {
-        width: 100%;
-        max-width: 580px;
-        background: var(--bg-card);
-        border: 1.5px solid var(--border);
-        border-radius: var(--radius);
-        padding: 10px 14px;
+        padding: 16px 20px 10px;
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 6px;
-        flex-shrink: 0;
-        position: relative;
-      }
-
-      /* Hero Mic Button */
-      .mic-button-wrap {
-        position: relative;
-        width: 78px;
-        height: 78px;
-        display: flex;
-        align-items: center;
         justify-content: center;
+        gap: 10px;
+        flex-shrink: 0;
       }
+      .mic-button-wrap { position: relative; width: 68px; height: 68px; display: flex; align-items: center; justify-content: center; }
       .mic-pulse-wave {
-        position: absolute;
-        inset: -6px;
-        border-radius: 50%;
-        border: 2px solid var(--accent);
-        opacity: 0;
-        pointer-events: none;
+        position: absolute; inset: -8px; border-radius: 50%;
+        background: radial-gradient(circle, var(--error-soft), transparent 70%);
+        opacity: 0; pointer-events: none;
       }
       .mic-pulse-wave.active {
-        animation: pulseRing 1.6s cubic-bezier(0.2, 0, 0.4, 1) infinite;
+        opacity: 1;
+        animation: pulse 1.4s ease-out infinite;
       }
-      @keyframes pulseRing {
-        0%   { transform: scale(0.85); opacity: 0.9; }
-        100% { transform: scale(1.35); opacity: 0; }
+      @keyframes pulse {
+        0% { transform: scale(0.9); opacity: 0.8; }
+        100% { transform: scale(1.4); opacity: 0; }
       }
-
       .btn-main-mic {
-        width: 74px;
-        height: 74px;
+        width: 64px; height: 64px;
         border-radius: 50%;
-        background: linear-gradient(135deg, #10b981, #059669);
-        color: #ffffff;
-        font-size: 30px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 4px 20px var(--accent-glow);
-        border: 3px solid rgba(255, 255, 255, 0.2);
-        z-index: 2;
-        transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+        background: var(--bg-card);
+        border: 2px solid var(--border);
+        font-size: 26px;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.3);
       }
-      .btn-main-mic:hover:not(:disabled) {
-        transform: scale(1.05);
-        box-shadow: 0 6px 28px var(--accent-glow);
-      }
+      .btn-main-mic:hover { border-color: var(--accent); }
       .btn-main-mic.listening {
-        background: linear-gradient(135deg, #ef4444, #dc2626);
-        box-shadow: 0 4px 24px rgba(239, 68, 68, 0.5);
-        animation: micBeat 1.1s ease-in-out infinite alternate;
+        border-color: var(--error);
+        background: #2a1215;
       }
-      @keyframes micBeat {
-        0% { transform: scale(1); }
-        100% { transform: scale(1.06); }
-      }
-      .btn-main-mic.speaking {
-        background: linear-gradient(135deg, #38bdf8, #0284c7);
-        box-shadow: 0 4px 20px rgba(56, 189, 248, 0.4);
-      }
-      .btn-main-mic.processing {
-        background: linear-gradient(135deg, #a855f7, #7e22ce);
-      }
-      .btn-main-mic.error {
-        background: linear-gradient(135deg, #475569, #334155);
-        border-color: var(--warn);
-        color: var(--warn);
-      }
+      .btn-main-mic.speaking { border-color: var(--accent); background: var(--accent-soft); }
 
-      /* Status Pill */
       .mic-status-pill {
         display: inline-flex;
         align-items: center;
@@ -520,271 +502,265 @@
         background: var(--bg-elevated);
         border: 1px solid var(--border);
         font-size: 11px;
-        font-weight: 500;
         color: var(--text2);
       }
-      .mic-status-dot {
-        width: 7px; height: 7px;
-        border-radius: 50%;
-        background: var(--accent);
-      }
-      .mic-status-pill.listening .mic-status-dot { background: var(--error); animation: blink 800ms infinite; }
-      .mic-status-pill.speaking .mic-status-dot { background: var(--blue); }
-      .mic-status-pill.processing .mic-status-dot { background: var(--purple); }
-      .mic-status-pill.error .mic-status-dot { background: var(--warn); }
-      @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+      .mic-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+      .mic-status-pill.listening .mic-status-dot { background: var(--error); }
+      .mic-status-pill.paused .mic-status-dot { background: var(--blue); }
 
-      /* In-Recording Stop & Cancel Controls */
-      .recording-controls {
-        display: none;
-        align-items: center;
-        gap: 8px;
-        margin-top: 2px;
-      }
+      .recording-controls { display: none; gap: 8px; margin-top: 2px; }
       .recording-controls.active { display: flex; }
+      .btn-cancel-rec {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        color: var(--text3);
+        padding: 5px 12px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+      }
       .btn-stop-rec {
         background: var(--accent);
         color: #042f20;
         font-weight: 700;
+        padding: 5px 14px;
+        border-radius: var(--radius-sm);
         font-size: 11px;
-        padding: 5px 12px;
-        border-radius: var(--radius-pill);
-      }
-      .btn-cancel-rec {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        color: var(--text2);
-        font-size: 11px;
-        padding: 5px 10px;
-        border-radius: var(--radius-pill);
       }
 
-      /* Compact Transcript: Collapsed by default */
       .transcript-preview {
-        display: none;
-        width: 100%;
-        background: rgba(9, 13, 22, 0.7);
+        max-width: 90%;
+        font-size: 12px;
+        color: var(--text2);
+        background: var(--bg-surface);
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
         padding: 6px 10px;
-        font-size: 12px;
-        color: var(--text);
-        text-align: center;
-        word-break: break-word;
+        display: none;
       }
       .transcript-preview.visible { display: block; }
-      .transcript-preview.interim { color: var(--text2); font-style: italic; }
+      .transcript-preview.interim { color: var(--text3); font-style: italic; }
 
-      /* Error Diagnostics Banner with Retry & Type actions */
+      /* Speech Diagnostic */
       .speech-diagnostic-card {
-        display: none;
-        width: 100%;
-        max-width: 580px;
         background: var(--warn-soft);
-        border: 1px solid rgba(245, 158, 11, 0.3);
-        border-radius: var(--radius);
+        border: 1px solid var(--warn);
+        border-radius: var(--radius-sm);
         padding: 8px 12px;
-        font-size: 11px;
-        color: var(--text);
-        flex-shrink: 0;
-      }
-      .speech-diagnostic-card.visible { display: flex; flex-direction: column; gap: 4px; }
-      .diag-top {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      .diag-title {
-        font-weight: 600;
-        color: var(--warn);
-        display: flex;
-        align-items: center;
-        gap: 4px;
-      }
-      .diag-actions {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .btn-diag {
-        background: var(--bg-elevated);
-        border: 1px solid rgba(245, 158, 11, 0.4);
-        color: var(--text);
-        padding: 3px 8px;
-        border-radius: var(--radius-pill);
-        font-size: 10px;
-        font-weight: 600;
-      }
-      .btn-diag:hover { border-color: var(--accent); color: var(--accent); }
-      .diag-desc {
-        color: var(--text2);
-        line-height: 1.35;
-      }
-
-      /* Feedback Deck: Grammar, Natural Expression, Vocab */
-      .feedback-deck {
+        margin: 0 16px 8px;
         display: none;
-        width: 100%;
-        max-width: 580px;
-        background: var(--bg-card);
-        border: 1px solid rgba(245, 158, 11, 0.35);
-        border-radius: var(--radius);
-        padding: 8px 12px;
-        flex-shrink: 0;
       }
-      .feedback-deck.visible { display: flex; flex-direction: column; gap: 4px; }
-      .feedback-header {
+      .speech-diagnostic-card.visible { display: block; }
+      .diag-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+      .diag-title { font-size: 11px; font-weight: 700; color: var(--warn); }
+      .diag-actions { display: flex; gap: 6px; }
+      .btn-diag {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text);
         font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .diag-desc { font-size: 11px; color: var(--text2); line-height: 1.35; }
+
+      /* Feedback Deck */
+      .feedback-deck {
+        margin: 0 16px 8px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 8px 12px;
+        display: none;
+        max-height: 140px;
+        overflow-y: auto;
+      }
+      .feedback-deck.visible { display: block; }
+      .feedback-deck.faded { opacity: 0.45; }
+      .feedback-header {
+        font-size: 11px;
         font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.07em;
-        color: var(--warn);
+        color: var(--text2);
+        margin-bottom: 6px;
         display: flex;
-        align-items: center;
-        gap: 4px;
+        justify-content: space-between;
       }
       .grammar-item {
         font-size: 12px;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        flex-wrap: wrap;
+        padding: 6px 0;
+        border-top: 1px solid var(--border);
       }
+      .grammar-item:first-of-type { border-top: none; }
       .grammar-item .frag { color: var(--error); text-decoration: line-through; }
-      .grammar-item .arrow { color: var(--text3); }
       .grammar-item .sugg { color: var(--accent); font-weight: 600; }
       .grammar-item .rule-tag {
         font-size: 9px;
-        background: rgba(245, 158, 11, 0.2);
+        background: var(--warn-soft);
         color: var(--warn);
         padding: 1px 5px;
-        border-radius: 4px;
+        border-radius: 3px;
+        margin-left: 6px;
       }
-
-      /* Compact Collapsible "Type Instead" Fallback */
-      .type-fallback-wrap {
-        width: 100%;
-        max-width: 580px;
-        background: var(--bg-surface);
+      .better-exprs { margin-top: 4px; font-size: 11px; color: var(--text3); }
+      .btn-rewrite {
+        background: var(--bg-elevated);
         border: 1px solid var(--border);
-        border-radius: var(--radius);
-        overflow: hidden;
+        color: var(--text2);
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-size: 10px;
+        margin-top: 4px;
+      }
+      .btn-rewrite:hover { color: var(--accent); border-color: var(--accent); }
+
+      /* Type Fallback */
+      .type-fallback-wrap {
+        margin: auto 16px 12px;
         flex-shrink: 0;
       }
       .type-toggle-btn {
         width: 100%;
-        background: transparent;
-        border: none;
-        padding: 6px 12px;
-        font-size: 11px;
-        color: var(--text2);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .type-toggle-btn:hover { color: var(--text); background: var(--bg-elevated); }
-      .type-drawer {
-        display: none;
-        padding: 0 10px 10px;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .type-drawer.open { display: flex; }
-      .type-input-row {
-        display: flex;
-        gap: 6px;
-        align-items: flex-end;
-      }
-      .type-input-row textarea {
-        flex: 1;
-        min-height: 36px;
-        max-height: 60px;
-        font-size: 12px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        color: var(--text3);
         padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
       }
+      .type-toggle-btn:hover { color: var(--text2); }
+      .type-drawer { display: none; padding-top: 6px; }
+      .type-drawer.open { display: block; }
+      .type-input-row { display: flex; gap: 6px; }
+      .type-input-row textarea { flex: 1; }
       .btn-send-text {
         background: var(--accent);
         color: #042f20;
         font-weight: 700;
-        font-size: 12px;
-        padding: 8px 14px;
+        padding: 0 16px;
         border-radius: var(--radius-sm);
-        height: 36px;
-        white-space: nowrap;
       }
 
-      /* ── OTHER TABS (History, Notebook, Progress) ── */
-      #panel-history {
+      /* Chat Messages (History Tab) */
+      .chat-messages {
+        flex: 1;
         overflow-y: auto;
-        padding: 14px 16px;
+        padding: 14px;
         display: flex;
         flex-direction: column;
         gap: 10px;
       }
-      .chat-messages { display: flex; flex-direction: column; gap: 10px; }
-      .msg { display: flex; gap: 8px; max-width: 90%; }
+      .msg { display: flex; gap: 8px; max-width: 85%; }
       .msg.user { align-self: flex-end; flex-direction: row-reverse; }
       .msg-avatar {
-        width: 28px; height: 28px;
-        border-radius: 50%;
+        width: 28px; height: 28px; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        font-size: 13px;
-        flex-shrink: 0;
+        background: var(--bg-elevated); font-size: 14px; flex-shrink: 0;
       }
-      .msg.coach .msg-avatar { background: linear-gradient(135deg, var(--accent), #047857); color: #042f20; }
-      .msg.user  .msg-avatar { background: var(--bg-elevated); border: 1px solid var(--border); }
       .msg-bubble {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
         border-radius: var(--radius);
         padding: 8px 12px;
         font-size: 12px;
-        line-height: 1.45;
+        line-height: 1.4;
       }
-      .msg.coach .msg-bubble { background: var(--bg-card); border: 1px solid var(--border); }
-      .msg.user  .msg-bubble { background: #064e3b; border: 1px solid rgba(16,185,129,.3); color: #ecfdf5; }
+      .msg.user .msg-bubble { background: var(--accent-soft); border-color: rgba(16,185,129,0.3); }
 
-      .notebook-list, .progress-list {
+      /* Notebook Tab */
+      .notebook-toolbar {
+        padding: 10px 14px 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+        flex-shrink: 0;
+      }
+      .nb-filter-pills { display: flex; gap: 6px; overflow-x: auto; }
+      .nb-pill {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        color: var(--text2);
+        padding: 3px 10px;
+        border-radius: var(--radius-pill);
+        font-size: 10px;
+        font-weight: 600;
+      }
+      .nb-pill.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+      .nb-search-wrap input { width: 100%; padding: 5px 10px; font-size: 11px; }
+
+      .notebook-list {
         flex: 1;
         overflow-y: auto;
-        padding: 12px 16px;
+        padding: 12px 14px;
         display: flex;
         flex-direction: column;
         gap: 8px;
       }
-      .nb-empty { color: var(--text3); font-size: 12px; text-align: center; padding: 24px 0; }
       .nb-card {
         background: var(--bg-card);
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
-        padding: 8px 12px;
+        padding: 10px 12px;
         font-size: 12px;
       }
-      .nb-card .nb-meta { color: var(--text3); font-size: 10px; margin-bottom: 3px; }
-      .nb-card .nb-original { color: var(--text2); margin-bottom: 3px; }
-      .nb-card .nb-correction { color: var(--accent); display: flex; align-items: center; gap: 4px; font-weight: 600; }
-      .nb-card .nb-rule {
-        font-size: 9px; color: var(--warn);
-        background: var(--warn-soft);
-        border-radius: 4px; padding: 1px 5px; margin-left: auto;
+      .nb-card-top { display: flex; justify-content: space-between; font-size: 10px; color: var(--text3); margin-bottom: 4px; }
+      .nb-card-orig { color: var(--error); margin-bottom: 3px; font-style: italic; }
+      .nb-card-sugg { color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+      .nb-card-expl { font-size: 11px; color: var(--text2); margin-bottom: 6px; }
+      .nb-card-actions { display: flex; gap: 6px; }
+      .nb-status-btn {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        color: var(--text2);
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 10px;
       }
+      .nb-status-btn:hover { border-color: var(--accent); color: var(--text); }
+      .nb-status-btn.fixed { color: var(--accent); border-color: var(--accent); }
 
-      .progress-row {
+      /* Progress Tab */
+      .progress-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 14px;
         display: flex;
-        align-items: center;
-        gap: 12px;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .progress-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .prog-stat-card {
         background: var(--bg-card);
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
-        padding: 10px 14px;
+        padding: 10px 12px;
       }
-      .progress-row .pr-icon { font-size: 20px; }
-      .progress-row .pr-label { font-size: 11px; color: var(--text2); }
-      .progress-row .pr-val { font-size: 18px; font-weight: 700; color: var(--accent); }
-      .storage-note { font-size: 10px; color: var(--text3); text-align: center; padding: 6px; }
+      .prog-stat-card .val { font-size: 17px; font-weight: 700; color: var(--accent); }
+      .prog-stat-card .lbl { font-size: 10px; color: var(--text2); margin-top: 1px; }
 
-      /* Summary Screen */
+      .honesty-notice-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 10px 12px;
+        font-size: 11px;
+        color: var(--text2);
+        line-height: 1.4;
+      }
+
+      /* ─────────────────────────────────────────────────────
+         SUMMARY SCREEN
+      ───────────────────────────────────────────────────── */
       #summary-screen { overflow-y: auto; }
-      .summary-inner { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+      .summary-inner { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
       .summary-hero {
         text-align: center;
         padding: 16px;
@@ -792,8 +768,8 @@
         border: 1px solid var(--border);
         border-radius: var(--radius);
       }
-      .summary-emoji { font-size: 40px; }
-      .summary-hero h2 { font-size: 18px; font-weight: 700; margin-top: 6px; }
+      .summary-emoji { font-size: 36px; }
+      .summary-hero h2 { font-size: 17px; font-weight: 700; margin-top: 4px; }
       .summary-hero p  { font-size: 12px; color: var(--text2); margin-top: 2px; }
       .summary-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
       .sum-stat {
@@ -803,18 +779,20 @@
         padding: 10px;
         text-align: center;
       }
-      .sum-stat .sv { font-size: 20px; font-weight: 700; color: var(--accent); }
+      .sum-stat .sv { font-size: 18px; font-weight: 700; color: var(--accent); }
       .sum-stat .sl { font-size: 10px; color: var(--text2); }
 
-      .next-step {
-        display: flex; align-items: flex-start; gap: 8px;
+      .summary-section {
         background: var(--bg-card);
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
-        padding: 8px 10px;
-        font-size: 11px;
+        padding: 12px;
       }
-      .summary-cta { display: flex; gap: 8px; }
+      .summary-section h3 { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
+      .summary-list { display: flex; flex-direction: column; gap: 6px; }
+      .summary-item { font-size: 11px; color: var(--text2); display: flex; gap: 6px; }
+
+      .summary-cta { display: flex; gap: 8px; margin-top: 4px; }
       .btn-secondary {
         flex: 1;
         background: var(--bg-elevated);
@@ -822,9 +800,38 @@
         color: var(--text);
         font-weight: 600;
         font-size: 12px;
-        padding: 10px 16px;
+        padding: 10px 14px;
         border-radius: var(--radius);
+        text-align: center;
       }
+
+      /* ─────────────────────────────────────────────────────
+         SETTINGS & PRIVACY MODAL
+      ───────────────────────────────────────────────────── */
+      .modal-backdrop {
+        position: fixed; inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        display: none; align-items: center; justify-content: center;
+        z-index: 800;
+        padding: 16px;
+      }
+      .modal-backdrop.open { display: flex; }
+      .modal-box {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        max-width: 480px; width: 100%;
+        max-height: 85vh;
+        overflow-y: auto;
+        padding: 20px;
+        display: flex; flex-direction: column; gap: 14px;
+        box-shadow: 0 16px 36px rgba(0,0,0,0.6);
+      }
+      .modal-header { display: flex; justify-content: space-between; align-items: center; }
+      .modal-header h3 { font-size: 15px; font-weight: 700; }
+      .modal-body { font-size: 11px; color: var(--text2); line-height: 1.5; display: flex; flex-direction: column; gap: 10px; }
+      .modal-body h4 { font-size: 12px; font-weight: 600; color: var(--text); margin-top: 4px; }
+      .modal-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 
       /* Vocab Popup & Toast */
       .vocab-popup {
@@ -892,7 +899,7 @@
     </div>
 
     <!-- Toast container -->
-    <div class="toast-container" id="toast-container"></div>
+    <div class="toast-container" id="toast-container" aria-live="polite"></div>
 
     <!-- Vocab popup -->
     <div class="vocab-popup" id="vocab-popup" role="tooltip">
@@ -910,6 +917,14 @@
           <div class="home-title">
             <h1>SpeakUp AI</h1>
             <p>English Conversation Practice Coach</p>
+          </div>
+          <div class="home-header-actions">
+            <button class="btn-icon-subtle" id="font-toggle-btn" title="Toggle text size" aria-label="Toggle text size">
+              <span id="font-size-label">A+</span>
+            </button>
+            <button class="btn-icon-subtle" id="settings-btn" title="Settings & Privacy" aria-label="Settings and Privacy">
+              <span>⚙️</span> Privacy
+            </button>
           </div>
         </div>
 
@@ -932,20 +947,31 @@
         <div class="scenario-grid" id="scenario-grid" role="list"></div>
 
         <div class="home-cta">
+          <div style="font-size:11px;color:var(--text2);text-align:center;font-weight:600;">Choose practice duration:</div>
+          <div class="duration-selector" id="duration-selector">
+            <button class="duration-pill" data-mins="5" type="button">5m</button>
+            <button class="duration-pill selected" data-mins="10" type="button">10m</button>
+            <button class="duration-pill" data-mins="15" type="button">15m</button>
+            <button class="duration-pill" data-mins="30" type="button">30m</button>
+            <button class="duration-pill" data-mins="60" type="button">1 hour</button>
+            <button class="duration-pill" data-mins="custom" id="custom-pill-btn" type="button">Custom</button>
+            <input type="number" class="custom-duration-input" id="custom-mins-input" min="1" max="180" placeholder="Mins" />
+          </div>
+
           <button class="btn-primary" id="start-btn">
-            <span>🎙️</span> Start 10-minute practice
+            <span>🎙️</span> Start Speaking Practice
           </button>
           <div class="session-meta">
-            <span>⏱ 10 minutes</span>
+            <span id="session-duration-meta">⏱ 10 minutes</span>
             <div class="dot"></div>
-            <span id="ai-badge">🗣️ Voice coach</span>
+            <span id="ai-badge">Checking runtime…</span>
             <div class="dot"></div>
-            <span>🔒 Private</span>
+            <span>🔒 Account-private (APS)</span>
           </div>
         </div>
       </section>
 
-      <!-- ═══ CONVERSATION SCREEN (ZERO SCROLLING) ════════════ -->
+      <!-- ═══ CONVERSATION SCREEN ═════════════════════════════ -->
       <section id="conv-screen" class="screen" role="main" aria-label="Conversation practice">
 
         <!-- Compact Header -->
@@ -953,17 +979,28 @@
           <button class="btn-icon" id="back-btn" title="Exit session">←</button>
           <div class="conv-title">
             <h2 id="conv-title">Practice</h2>
-            <span class="turn-badge" id="conv-subtitle">Turn 1 of 4</span>
+            <span class="turn-badge" id="conv-subtitle">Turn 1</span>
           </div>
 
-          <button class="btn-audio-ctrl" id="sound-toggle-btn" title="Toggle coach voice speech">
-            <span id="sound-icon">🔊</span>
-            <span id="sound-label">Audio ON</span>
-          </button>
+          <div class="header-actions">
+            <button class="btn-audio-ctrl" id="pause-session-btn" title="Pause / Resume conversation timer and mic">
+              <span id="pause-icon">⏸</span>
+              <span id="pause-label">Pause</span>
+            </button>
 
-          <div class="timer-pill" id="timer-pill">
-            <span>⏱</span>
-            <span id="timer-text">10:00</span>
+            <button class="btn-audio-ctrl" id="sound-toggle-btn" title="Toggle coach voice speech">
+              <span id="sound-icon">🔊</span>
+              <span id="sound-label">Audio ON</span>
+            </button>
+            <button class="btn-audio-ctrl" id="end-session-btn" title="End this practice session">
+              <span>■</span>
+              <span>End session</span>
+            </button>
+
+            <div class="timer-pill" id="timer-pill">
+              <span>⏱</span>
+              <span id="timer-text">10:00</span>
+            </div>
           </div>
         </div>
 
@@ -983,14 +1020,15 @@
           </button>
         </div>
 
-        <!-- ── TAB 1: PRACTICE STAGE (100% VISIBLE WITHOUT SCROLL) ── -->
+        <!-- ── TAB 1: PRACTICE STAGE ── -->
         <div class="tab-panel active" id="panel-practice" role="tabpanel">
 
-          <!-- 1. Compact Coach Prompt Card (shown ONCE, no duplicate bubbles) -->
+          <!-- 1. Coach Prompt Card -->
           <div class="coach-card" id="coach-card">
             <div class="coach-card-header">
-              <span class="coach-label">
-                <span>🎙️</span> AI Coach
+              <span class="coach-label" id="coach-label">
+                <span id="coach-label-icon">🎙️</span>
+                <span id="coach-label-text">Coach</span>
                 <span class="speaking-bars" id="coach-speaking-bars">
                   <span></span><span></span><span></span>
                 </span>
@@ -1001,11 +1039,11 @@
             </div>
 
             <!-- Single coach question -->
-            <div class="coach-question-text" id="coach-prompt-text">
+            <div class="coach-question-text" id="coach-prompt-text" aria-live="polite">
               Loading prompt…
             </div>
 
-            <!-- Compact footer strip with hint & vocab -->
+            <!-- Footer strip with hint & vocab -->
             <div class="coach-footer-strip">
               <span class="coach-hint" id="coach-hint-card">
                 💡 <span id="coach-hint-text"></span>
@@ -1014,7 +1052,7 @@
             </div>
           </div>
 
-          <!-- 2. HIGH-CONTRAST CENTER MICROPHONE STAGE (DIRECTLY BELOW QUESTION) -->
+          <!-- 2. HIGH-CONTRAST CENTER MICROPHONE STAGE -->
           <div class="speaking-center-stage" id="speaking-center-stage">
             <div class="mic-button-wrap">
               <div class="mic-pulse-wave" id="mic-pulse-wave"></div>
@@ -1035,34 +1073,37 @@
               <button class="btn-stop-rec" id="done-voice-btn" type="button">⏹ Finish & Send</button>
             </div>
 
-            <!-- Compact live transcript (collapsed by default) -->
+            <!-- Compact live transcript -->
             <div class="transcript-preview" id="transcript-preview"></div>
           </div>
 
-          <!-- 3. Honest Speech Recognition Diagnostic Banner -->
+          <!-- 3. Speech Recognition Diagnostic Banner -->
           <div class="speech-diagnostic-card" id="speech-diagnostic-card">
             <div class="diag-top">
-              <span class="diag-title">⚠️ Speech Recognition Unavailable</span>
+              <span class="diag-title">⚠️ Speech Recognition Notice</span>
               <div class="diag-actions">
                 <button class="btn-diag" id="retry-mic-btn" type="button">🔄 Retry Mic</button>
                 <button class="btn-diag" id="open-type-btn" type="button">⌨️ Type Response</button>
               </div>
             </div>
             <p class="diag-desc" id="diag-desc">
-              Chromium cloud speech service is currently unable to reach its recognition servers. You can retry or use the text input below.
+              Browser speech recognition is unavailable or blocked. You can retry or type below.
             </p>
           </div>
 
-          <!-- 4. Concise Feedback Deck (Grammar & Vocabulary) -->
+          <!-- 4. Feedback Deck (Grammar & Expressions) -->
           <div class="feedback-deck" id="feedback-deck">
-            <div class="feedback-header">✍️ Grammar & Expressions Feedback</div>
+            <div class="feedback-header">
+              <span>✍️ Grammar & Expressions Feedback</span>
+              <span id="feedback-timing-note" style="font-weight:400;font-size:10px;color:var(--text3);"></span>
+            </div>
             <div id="feedback-items"></div>
           </div>
 
-          <!-- 5. Small Collapsible "Type Instead" Fallback -->
+          <!-- 5. Collapsible "Type Instead" Fallback -->
           <div class="type-fallback-wrap" id="type-fallback-wrap">
             <button class="type-toggle-btn" id="type-toggle-btn" type="button" aria-expanded="false">
-              <span>⌨️ Type instead (fallback)</span>
+              <span>⌨️ Type your response instead</span>
               <span id="type-chevron">▾</span>
             </button>
             <div class="type-drawer" id="type-drawer">
@@ -1082,25 +1123,63 @@
 
         <!-- ── TAB 3: NOTEBOOK PANEL ── -->
         <div class="tab-panel" id="panel-notebook" role="tabpanel">
+          <div class="notebook-toolbar">
+            <div class="nb-filter-pills">
+              <button class="nb-pill active" data-filter="all">All</button>
+              <button class="nb-pill" data-filter="new">New</button>
+              <button class="nb-pill" data-filter="practising">Practising</button>
+              <button class="nb-pill" data-filter="fixed">Mastered</button>
+            </div>
+            <div class="nb-search-wrap">
+              <input type="search" id="nb-search-input" placeholder="Search saved corrections…" />
+            </div>
+          </div>
           <div class="notebook-list" id="notebook-list">
-            <p class="nb-empty">No corrections yet. Start practising!</p>
+            <p class="nb-empty">No corrections saved yet. Practice speaking to capture learning points!</p>
           </div>
         </div>
 
         <!-- ── TAB 4: PROGRESS PANEL ── -->
         <div class="tab-panel" id="panel-progress" role="tabpanel">
           <div class="progress-list" id="progress-list">
-            <div class="progress-row">
-              <div class="pr-icon">📚</div>
-              <div><div class="pr-label">Sessions completed</div><div class="pr-val" id="pr-sessions">–</div></div>
+            <div class="progress-grid">
+              <div class="prog-stat-card">
+                <div class="val" id="pr-sessions">0</div>
+                <div class="lbl">Sessions Completed</div>
+              </div>
+              <div class="prog-stat-card">
+                <div class="val" id="pr-minutes">0</div>
+                <div class="lbl">Minutes Practised</div>
+              </div>
+              <div class="prog-stat-card">
+                <div class="val" id="pr-answers">0</div>
+                <div class="lbl">Speaking Turns Answered</div>
+              </div>
+              <div class="prog-stat-card">
+                <div class="val" id="pr-avg-words">0</div>
+                <div class="lbl">Avg Words Per Turn</div>
+              </div>
+              <div class="prog-stat-card">
+                <div class="val" id="pr-mistakes">0</div>
+                <div class="lbl">Corrections Detected (Rules)</div>
+              </div>
+              <div class="prog-stat-card">
+                <div class="val" id="pr-fixed">0</div>
+                <div class="lbl">Notebook Items Mastered</div>
+              </div>
+              <div class="prog-stat-card">
+                <div class="val" id="pr-vocab">0</div>
+                <div class="lbl">Vocabulary Words Explored</div>
+              </div>
+              <div class="prog-stat-card">
+                <div class="val" id="pr-streak">0</div>
+                <div class="lbl">Day Streak</div>
+              </div>
             </div>
-            <div class="progress-row">
-              <div class="pr-icon">✍️</div>
-              <div><div class="pr-label">Grammar corrections saved</div><div class="pr-val" id="pr-mistakes">–</div></div>
-            </div>
-            <div class="progress-row">
-              <div class="pr-icon">🔤</div>
-              <div><div class="pr-label">Words explored</div><div class="pr-val" id="pr-vocab">–</div></div>
+
+            <div class="honesty-notice-card">
+              <strong>Honest Metric Transparency</strong><br />
+              All figures above are calculated directly from your stored practice activity. SpeakUp AI does not generate speculative CEFR levels, invented fluency ratings, or arbitrary percentages.
             </div>
             <p class="storage-note" id="storage-note"></p>
           </div>
@@ -1114,7 +1193,7 @@
           <div class="summary-hero">
             <div class="summary-emoji" id="sum-emoji">🎉</div>
             <h2 id="sum-title">Session complete!</h2>
-            <p id="sum-subtitle">Great effort — here is what you practised today.</p>
+            <p id="sum-subtitle">Great effort — here is your practice review.</p>
           </div>
 
           <div class="summary-stats">
@@ -1124,28 +1203,67 @@
             </div>
             <div class="sum-stat">
               <div class="sv" id="sum-corrections">0</div>
-              <div class="sl">Corrections caught</div>
+              <div class="sl">Corrections reviewed</div>
             </div>
             <div class="sum-stat">
               <div class="sv" id="sum-words">0</div>
-              <div class="sl">Words shown</div>
+              <div class="sl">Words explored</div>
             </div>
           </div>
 
           <div class="summary-section">
-            <h3 style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text2);">Next practice focus</h3>
-            <div class="next-steps" id="next-steps" style="display:flex;flex-direction:column;gap:6px;"></div>
+            <h3>Strengths Identified</h3>
+            <div class="summary-list" id="sum-strengths"></div>
+          </div>
+
+          <div class="summary-section">
+            <h3>Top Focus Priorities</h3>
+            <div class="summary-list" id="sum-priorities"></div>
+          </div>
+
+          <div class="summary-section">
+            <h3>Useful Expressions for this Scenario</h3>
+            <div class="summary-list" id="sum-phrases"></div>
           </div>
 
           <div class="summary-cta">
-            <button class="btn-secondary" id="review-notebook-btn">📓 Review notebook</button>
-            <button class="btn-primary"   id="new-session-btn"    style="flex:1">Start again</button>
+            <button class="btn-secondary" id="review-notebook-btn">📓 Review Notebook</button>
+            <button class="btn-primary"   id="new-session-btn"    style="flex:1">Practice Again</button>
           </div>
         </div>
       </section>
 
+      <!-- ═══ SETTINGS & PRIVACY MODAL ════════════════════════ -->
+      <div class="modal-backdrop" id="privacy-modal" role="dialog" aria-modal="true" aria-labelledby="modal-privacy-title">
+        <div class="modal-box">
+          <div class="modal-header">
+            <h3 id="modal-privacy-title">⚙️ Settings & Privacy Transparency</h3>
+            <button class="btn-icon" id="close-modal-btn" aria-label="Close modal">✕</button>
+          </div>
+          <div class="modal-body">
+            <h4>Data Storage & Scoping</h4>
+            <p>
+              Your notebook entries and progress counters are stored securely in your Anna Persistent Storage (APS KV) tool partition. All data is scoped to your Anna account. No external database, third-party analytics, or cross-site tracking cookies are used.
+            </p>
+            <h4>AI Coaching vs Basic Mode</h4>
+            <p>
+              When your Anna plan supports LLM Sampling, the coach requests completions from Anna's native host LLM (reverse Sampling). If Sampling is unavailable or denied, the app automatically runs in deterministic, rule-based basic mode. We never present rule-based responses as AI output.
+            </p>
+            <h4>Data Rights & Control</h4>
+            <p>
+              You have full control over your stored practice records. You may export your entire notebook and progress as JSON or delete all records at any time.
+            </p>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-secondary" id="export-data-btn">📥 Export Data (JSON)</button>
+            <button class="btn-secondary" id="clear-data-btn" style="color:var(--error);border-color:var(--error-soft);">🗑 Delete All Data</button>
+          </div>
+        </div>
+      </div>
+
     </div><!-- #app -->
 
+    <script src="./anna-tool-ids.js"></script>
     <script src="./app.js" type="module"></script>
   </body>
 </html>

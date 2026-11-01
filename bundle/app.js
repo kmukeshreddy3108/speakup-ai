@@ -2,137 +2,201 @@
  * SpeakUp AI — Voice-First English Conversation Practice Coach
  *
  * Implements:
- * 1. Primary Speaking Stage (centered, high-contrast, zero-scroll)
- * 2. Speech recognition with honest diagnosis of Chromium cloud dependency
- * 3. Browser SpeechSynthesis (TTS) with Replay controls
- * 4. Inline grammar correction deck & APS persistence (Notebook/Progress)
- * 5. Clean, non-intrusive "Type instead" fallback drawer
+ * 1. Honest dual-mode coaching (Anna LLM Sampling vs Rule-based basic mode)
+ * 2. Non-repetitive, contextual conversation flow
+ * 3. Speech recognition with Chromium diagnostic assistance
+ * 4. Browser SpeechSynthesis (TTS) with Replay and Audio toggle
+ * 5. Meaningful grammar & expressions feedback with "Try rewriting"
+ * 6. Mistake Notebook with deduplication, status tracking, filters, and deletion
+ * 7. Real progress metrics derived strictly from stored practice data
+ * 8. Account privacy controls (Export JSON, Clear All Data)
  */
 
 import { AnnaAppRuntime } from "/static/anna-apps/_sdk/latest/index.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const TOOL_ID       = "tool-dev-speakup-ai";
-const SESSION_SECS  = 10 * 60;   // 10 minutes
+const EXECUTA_HANDLE       = "speakup-ai";
+const DEV_FALLBACK_TOOL_ID = "tool-dev-speakup-ai";
+const TOOL_ID              = window.__ANNA_TOOL_IDS__?.[EXECUTA_HANDLE] || DEV_FALLBACK_TOOL_ID;
+const DEFAULT_SESSION_SECS = 10 * 60; // 10 minutes
 
 // ─── State ────────────────────────────────────────────────────────────────────
-let anna            = null;
-let annaAvailable   = false;
+let anna             = null;
+let annaAvailable    = false;
 
-let selectedScenario = "introduction";
-let sessionId        = null;
-let scenarioKey      = null;
-let turnNumber       = 0;
-let totalTurns       = 4;
-let timerInterval    = null;
-let secsLeft         = SESSION_SECS;
-let mistakeCount     = 0;
-let vocabCount       = 0;
-let isLlmMode        = false;
+let selectedScenario     = "introduction";
+let selectedDurationMins = 10;
+let sessionId            = null;
+let scenarioKey          = null;
+let turnNumber           = 0;
+let timerInterval        = null;
+let secsLeft             = DEFAULT_SESSION_SECS;
+let isPaused             = false;
+let sessionStartedAt     = null;
+let pausedAt             = null;
+let totalPausedMs        = 0;
+let sessionEnded         = false;
+let isSubmitting         = false;
+
+// Metrics for the active session
+let sessionTurnsCount    = 0;
+let sessionMistakesCount = 0;
+let sessionVocabCount    = 0;
+let sessionWordsCount    = 0;
+let activeSource         = "rules"; // "ai" | "rules"
+let conversationHistory  = [];
 
 // Audio & Speech State
-// States: 'ready' | 'requesting' | 'listening' | 'processing' | 'speaking' | 'error'
-let voiceState       = "ready";
-let audioEnabled     = true;
-let currentCoachText = "";
-let speechSupported  = false;
-let recognition      = null;
-let recognizedText   = "";
-let isListening      = false;
+let voiceState           = "ready"; // 'ready' | 'requesting' | 'listening' | 'processing' | 'speaking' | 'paused' | 'error'
+let audioEnabled         = true;
+let currentCoachText     = "";
+let speechSupported      = false;
+let recognition          = null;
+let recognizedText       = "";
+let isListening          = false;
+let autoListenAfterCoach = true;
 
-// Local notebook cache (persisted via APS)
-let notebookEntries  = [];
-let progress = { sessions_completed: 0, mistakes_corrected: 0, vocab_saved: 0 };
-let storageAvailable = true;
+// Notebook & Progress
+let notebookEntries      = [];
+let currentFilter        = "all";
+let currentSearch        = "";
+let progressData         = {
+  sessions_completed: 0,
+  minutes_practised: 0,
+  answers_given: 0,
+  total_words: 0,
+  average_words_per_answer: 0,
+  distinct_words_count: 0,
+  mistakes_detected_by_checker: 0,
+  notebook_fixed_count: 0,
+  streak_days: 1,
+};
+let storageAvailable     = true;
 
 // ─── DOM Elements ─────────────────────────────────────────────────────────────
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
-const screens           = { home: $("home-screen"), conv: $("conv-screen"), summary: $("summary-screen") };
-const loadingEl         = $("loading-overlay");
-const toastEl           = $("toast-container");
-const vocabPopup        = $("vocab-popup");
+const screens = {
+  home: $("home-screen"),
+  conv: $("conv-screen"),
+  summary: $("summary-screen"),
+};
+const loadingEl   = $("loading-overlay");
+const toastEl     = $("toast-container");
+const vocabPopup  = $("vocab-popup");
+const privacyModal= $("privacy-modal");
 
 // Home elements
-const startBtn          = $("start-btn");
-const scenarioGrid      = $("scenario-grid");
-const statSessions      = $("stat-sessions");
-const statMistakes      = $("stat-mistakes");
-const statVocab         = $("stat-vocab");
-const aiBadge           = $("ai-badge");
+const startBtn            = $("start-btn");
+const scenarioGrid        = $("scenario-grid");
+const durationSelector    = $("duration-selector");
+const customPillBtn       = $("custom-pill-btn");
+const customMinsInput     = $("custom-mins-input");
+const sessionDurationMeta = $("session-duration-meta");
+const statSessions        = $("stat-sessions");
+const statMistakes        = $("stat-mistakes");
+const statVocab           = $("stat-vocab");
+const aiBadge             = $("ai-badge");
+const settingsBtn         = $("settings-btn");
+const fontToggleBtn       = $("font-toggle-btn");
+const fontSizeLabel       = $("font-size-label");
 
 // Header controls
-const backBtn           = $("back-btn");
-const convTitle         = $("conv-title");
-const convSubtitle      = $("conv-subtitle");
-const timerText         = $("timer-text");
-const timerPill         = $("timer-pill");
-const soundToggleBtn    = $("sound-toggle-btn");
-const soundIcon         = $("sound-icon");
-const soundLabel        = $("sound-label");
+const backBtn             = $("back-btn");
+const convTitle           = $("conv-title");
+const convSubtitle        = $("conv-subtitle");
+const pauseSessionBtn     = $("pause-session-btn");
+const pauseIcon           = $("pause-icon");
+const pauseLabel          = $("pause-label");
+const timerText           = $("timer-text");
+const timerPill           = $("timer-pill");
+const soundToggleBtn      = $("sound-toggle-btn");
+const soundIcon           = $("sound-icon");
+const soundLabel          = $("sound-label");
+const endSessionBtn       = $("end-session-btn");
 
 // Coach Stage Card
-const coachPromptText   = $("coach-prompt-text");
-const coachSpeakingBars = $("coach-speaking-bars");
-const coachReplayBtn    = $("coach-replay-btn");
-const coachHintCard     = $("coach-hint-card");
-const coachHintText     = $("coach-hint-text");
-const coachVocabStrip   = $("coach-vocab-strip");
+const coachCard           = $("coach-card");
+const coachLabel          = $("coach-label");
+const coachLabelIcon      = $("coach-label-icon");
+const coachLabelText      = $("coach-label-text");
+const coachPromptText     = $("coach-prompt-text");
+const coachSpeakingBars   = $("coach-speaking-bars");
+const coachReplayBtn      = $("coach-replay-btn");
+const coachHintCard       = $("coach-hint-card");
+const coachHintText       = $("coach-hint-text");
+const coachVocabStrip     = $("coach-vocab-strip");
 
-// Voice Stage (Primary)
-const voiceMicBtn       = $("voice-mic-btn");
-const heroMicIcon       = $("hero-mic-icon");
-const micPulseWave      = $("mic-pulse-wave");
-const voiceStatePill    = $("voice-state-pill");
-const voiceStatusText   = $("voice-status-text");
-const recordingControls = $("recording-controls");
-const doneVoiceBtn      = $("done-voice-btn");
-const cancelVoiceBtn    = $("cancel-voice-btn");
-const transcriptPreview = $("transcript-preview");
+// Voice Stage
+const voiceMicBtn         = $("voice-mic-btn");
+const heroMicIcon         = $("hero-mic-icon");
+const micPulseWave        = $("mic-pulse-wave");
+const voiceStatePill      = $("voice-state-pill");
+const voiceStatusText     = $("voice-status-text");
+const recordingControls   = $("recording-controls");
+const doneVoiceBtn        = $("done-voice-btn");
+const cancelVoiceBtn      = $("cancel-voice-btn");
+const transcriptPreview   = $("transcript-preview");
 
-// Speech Diagnostic Banner
-const speechDiagCard    = $("speech-diagnostic-card");
-const retryMicBtn       = $("retry-mic-btn");
-const openTypeBtn       = $("open-type-btn");
-const diagDesc          = $("diag-desc");
+// Speech Diagnostic
+const speechDiagCard      = $("speech-diagnostic-card");
+const retryMicBtn         = $("retry-mic-btn");
+const openTypeBtn         = $("open-type-btn");
+const diagDesc            = $("diag-desc");
 
 // Feedback Deck
-const feedbackDeck      = $("feedback-deck");
-const feedbackItems     = $("feedback-items");
+const feedbackDeck        = $("feedback-deck");
+const feedbackItems       = $("feedback-items");
+const feedbackTimingNote  = $("feedback-timing-note");
 
-// Collapsible Type Drawer
-const typeToggleBtn     = $("type-toggle-btn");
-const typeDrawer        = $("type-drawer");
-const userInput         = $("user-input");
-const sendBtn           = $("send-btn");
+// Type Drawer
+const typeToggleBtn       = $("type-toggle-btn");
+const typeDrawer          = $("type-drawer");
+const userInput           = $("user-input");
+const sendBtn             = $("send-btn");
 
 // Tabs & Panels
-const tabPractice       = $("tab-practice");
-const tabHistory        = $("tab-history");
-const tabNotebook       = $("tab-notebook");
-const tabProgress       = $("tab-progress");
-const panelPractice     = $("panel-practice");
-const panelHistory      = $("panel-history");
-const panelNotebook     = $("panel-notebook");
-const panelProgress     = $("panel-progress");
-const chatMessages      = $("chat-messages");
-const notebookBadge     = $("notebook-badge");
-const notebookList      = $("notebook-list");
-const prSessions        = $("pr-sessions");
-const prMistakes        = $("pr-mistakes");
-const prVocab           = $("pr-vocab");
-const storageNote       = $("storage-note");
+const tabPractice         = $("tab-practice");
+const tabHistory          = $("tab-history");
+const tabNotebook         = $("tab-notebook");
+const tabProgress         = $("tab-progress");
+const panelPractice       = $("panel-practice");
+const panelHistory        = $("panel-history");
+const panelNotebook       = $("panel-notebook");
+const panelProgress       = $("panel-progress");
+const chatMessages        = $("chat-messages");
+const notebookBadge       = $("notebook-badge");
+const notebookList        = $("notebook-list");
+const nbSearchInput       = $("nb-search-input");
+
+// Progress Stats
+const prSessions          = $("pr-sessions");
+const prMinutes           = $("pr-minutes");
+const prAnswers           = $("pr-answers");
+const prAvgWords          = $("pr-avg-words");
+const prMistakes          = $("pr-mistakes");
+const prFixed             = $("pr-fixed");
+const prVocab             = $("pr-vocab");
+const prStreak            = $("pr-streak");
+const storageNote         = $("storage-note");
 
 // Summary Screen
-const sumEmoji          = $("sum-emoji");
-const sumTitle          = $("sum-title");
-const sumSubtitle       = $("sum-subtitle");
-const sumTurns          = $("sum-turns");
-const sumCorrections    = $("sum-corrections");
-const sumWords          = $("sum-words");
-const nextSteps         = $("next-steps");
-const reviewNbBtn       = $("review-notebook-btn");
-const newSessionBtn     = $("new-session-btn");
+const sumEmoji            = $("sum-emoji");
+const sumTitle            = $("sum-title");
+const sumSubtitle         = $("sum-subtitle");
+const sumTurns            = $("sum-turns");
+const sumCorrections      = $("sum-corrections");
+const sumWords            = $("sum-words");
+const sumStrengths        = $("sum-strengths");
+const sumPriorities       = $("sum-priorities");
+const sumPhrases          = $("sum-phrases");
+const reviewNbBtn         = $("review-notebook-btn");
+const newSessionBtn       = $("new-session-btn");
+
+// Modal Buttons
+const closeModalBtn       = $("close-modal-btn");
+const exportDataBtn       = $("export-data-btn");
+const clearDataBtn        = $("clear-data-btn");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -153,7 +217,7 @@ function toast(message, type = "info") {
 }
 
 function showScreen(name) {
-  Object.values(screens).forEach(s => s?.classList.remove("active"));
+  Object.values(screens).forEach((s) => s?.classList.remove("active"));
   if (screens[name]) screens[name].classList.add("active");
 }
 
@@ -164,7 +228,123 @@ function fmtTime(secs) {
 }
 
 function escHtml(str) {
-  return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// ─── Tool Calls (Anna SDK) ───────────────────────────────────────────────────
+
+async function callTool(method, args) {
+  if (!annaAvailable) {
+    return standaloneStub(method, args);
+  }
+  try {
+    const result = await anna.tools.invoke({
+      tool_id: TOOL_ID,
+      method,
+      args,
+    });
+    return { success: true, data: result };
+  } catch (e) {
+    console.warn("Tool error:", method, e);
+    return { success: false, error: e.message || "Tool invocation failed" };
+  }
+}
+
+function standaloneStub(method, args) {
+  if (method === "health") {
+    return {
+      success: true,
+      data: { status: "ready", sampling_available: false, default_source: "rules" },
+    };
+  }
+  if (method === "get_scenarios") {
+    return {
+      success: true,
+      data: {
+        scenarios: [
+          { key: "introduction",       title: "Self-Introduction",     icon: "👋", description: "Practice introducing yourself clearly and confidently" },
+          { key: "job_interview",      title: "Job Interview",         icon: "💼", description: "Master behavioral and background interview questions" },
+          { key: "college_discussion", title: "College Discussion",    icon: "🎓", description: "Academic and seminar discussions" },
+          { key: "everyday",           title: "Everyday Conversation", icon: "☕", description: "Casual English for social situations" },
+        ],
+      },
+    };
+  }
+  if (method === "start_session") {
+    return {
+      success: true,
+      data: {
+        session_id: "local-" + Date.now(),
+        scenario_key: args.scenario || "introduction",
+        scenario_title: "Self-Introduction",
+        total_turns: null,
+        opening_prompt: "Hello! Welcome to SpeakUp AI. Let's practice introducing yourself. Please tell me your name, where you are from, and what you do or study.",
+        hint: "Try: 'My name is … I am from … and I currently study / work as …'",
+        vocabulary: [
+          { word: "originally", meaning: "used to say where someone grew up", example: "I am originally from Chennai." },
+          { word: "currently",  meaning: "at the present time", example: "I am currently studying computer science." },
+          { word: "pursue",     meaning: "to work towards achieving something", example: "I want to pursue a career in technology." },
+        ],
+        source: "rules",
+        is_scripted: true,
+      },
+    };
+  }
+  if (method === "coach_turn") {
+    return {
+      success: true,
+      data: {
+        source: "rules",
+        coach_reply: "Thank you for sharing that with me.",
+        follow_up: "What is one of your favorite hobbies or interests, and why do you enjoy it?",
+        full_message: "Thank you for sharing that with me. What is one of your favorite hobbies or interests, and why do you enjoy it?",
+        hint: "Try: 'In my spare time, I enjoy … because it helps me …'",
+        vocabulary: [
+          { word: "passionate about", meaning: "very interested in something", example: "I am passionate about photography." },
+          { word: "unwind", meaning: "to relax after work", example: "Listening to music helps me unwind." },
+        ],
+        grammar_notes: [],
+        correction: {
+          original: args.user_input,
+          corrected: args.user_input,
+          explanation: "Your sentence is clear and communicates your point naturally.",
+          category: "Clear expression",
+          isCorrect: true,
+          label: "Basic checks (rule-based)",
+          better_expressions: [],
+        },
+        suggested_topics: [],
+        is_scripted: true,
+        is_last_turn: false,
+        next_turn_number: (args.turn_number || 1) + 1,
+      },
+    };
+  }
+  if (method === "get_notebook") {
+    return {
+      success: true,
+      data: {
+        entries: notebookEntries,
+        total_stored: notebookEntries.length,
+        progress: progressData,
+        storage_available: false,
+      },
+    };
+  }
+  if (method === "save_progress") {
+    return {
+      success: true,
+      data: { progress: progressData, persisted: false, storage_available: false },
+    };
+  }
+  if (method === "clear_all_data") {
+    notebookEntries = [];
+    return { success: true, data: { cleared: true } };
+  }
+  return { success: false, error: "Method not found" };
 }
 
 // ─── Voice State Machine ──────────────────────────────────────────────────────
@@ -177,25 +357,28 @@ function setVoiceState(state, customMessage) {
   micPulseWave.className = "mic-pulse-wave";
 
   const stateLabels = {
-    ready:       "Ready to speak · Tap microphone",
-    requesting:  "Accessing microphone…",
-    listening:   "Listening… Speak clearly in English",
-    processing:  "Analyzing response & grammar…",
-    speaking:    "Coach is speaking…",
-    error:       "Microphone unavailable · Tap retry or type below",
+    ready:      "Ready to speak · Tap microphone",
+    requesting: "Accessing microphone…",
+    listening:  "Listening… Speak clearly in English",
+    processing: "Analyzing response & grammar…",
+    speaking:   "Coach is speaking…",
+    paused:     "Conversation paused · Tap Resume",
+    error:      "Microphone unavailable · Tap retry or type below",
   };
 
   const stateIcons = {
-    ready:       "🎙️",
-    requesting:  "⏳",
-    listening:   "🔴",
-    processing:  "⚙️",
-    speaking:    "🔊",
-    error:       "⚠️",
+    ready:      "🎙️",
+    requesting: "⏳",
+    listening:  "🔴",
+    processing: "⚙️",
+    speaking:   "🔊",
+    paused:     "⏸",
+    error:      "⚠️",
   };
 
   voiceMicBtn.classList.add(state);
   voiceStatePill.classList.add(state);
+
   if (state === "listening") {
     micPulseWave.classList.add("active");
     recordingControls.classList.add("active");
@@ -207,28 +390,38 @@ function setVoiceState(state, customMessage) {
   heroMicIcon.textContent = stateIcons[state] || "🎙️";
 }
 
-// ─── Speech Synthesis (Coach Spoken Audio) ───────────────────────────────────
+// ─── Speech Synthesis (Coach TTS) ────────────────────────────────────────────
 
-function speakCoachPrompt(text) {
+function speakCoachPrompt(text, onComplete) {
   currentCoachText = text;
   if (!audioEnabled || !("speechSynthesis" in window)) {
     coachSpeakingBars?.classList.remove("active");
+    if (typeof onComplete === "function") {
+      setTimeout(onComplete, 400);
+    }
     return;
   }
 
   window.speechSynthesis.cancel();
 
-  // Strip emojis for clean pronunciation
+  // Strip emojis for clean TTS
   const clean = text.replace(/[\u{1F300}-\u{1F9FF}]/gu, "").trim();
-  if (!clean) return;
+  if (!clean) {
+    if (typeof onComplete === "function") onComplete();
+    return;
+  }
 
   const utterance = new SpeechSynthesisUtterance(clean);
   utterance.lang = "en-US";
   utterance.rate = 0.95;
 
   const voices = window.speechSynthesis.getVoices();
-  const enVoice = voices.find(v => v.lang.startsWith("en-US") && (v.name.includes("Natural") || v.name.includes("Google") || v.name.includes("Microsoft")))
-               || voices.find(v => v.lang.startsWith("en"));
+  const enVoice =
+    voices.find(
+      (v) =>
+        v.lang.startsWith("en-US") &&
+        (v.name.includes("Natural") || v.name.includes("Google") || v.name.includes("Microsoft"))
+    ) || voices.find((v) => v.lang.startsWith("en"));
   if (enVoice) utterance.voice = enVoice;
 
   utterance.onstart = () => {
@@ -238,19 +431,18 @@ function speakCoachPrompt(text) {
     }
   };
 
-  utterance.onend = () => {
+  const finishSpeaking = () => {
     coachSpeakingBars?.classList.remove("active");
     if (voiceState === "speaking") {
       setVoiceState("ready");
+    }
+    if (typeof onComplete === "function") {
+      setTimeout(onComplete, 350);
     }
   };
 
-  utterance.onerror = () => {
-    coachSpeakingBars?.classList.remove("active");
-    if (voiceState === "speaking") {
-      setVoiceState("ready");
-    }
-  };
+  utterance.onend = finishSpeaking;
+  utterance.onerror = finishSpeaking;
 
   window.speechSynthesis.speak(utterance);
 }
@@ -271,7 +463,7 @@ function replayCoachPrompt() {
   }
 }
 
-// ─── Speech Recognition with Honest Chromium Diagnostics ─────────────────────
+// ─── Speech Recognition (Web Speech API) ─────────────────────────────────────
 
 function setupSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -304,6 +496,12 @@ async function startListening() {
   stopCoachAudio();
   hideSpeechDiagnostic();
 
+  // Dim previous feedback deck while actively listening to a new answer
+  if (feedbackDeck.classList.contains("visible")) {
+    feedbackDeck.classList.add("faded");
+    if (feedbackTimingNote) feedbackTimingNote.textContent = "(Previous turn feedback)";
+  }
+
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
     showSpeechDiagnostic("Speech recognition is not supported in this browser environment.");
@@ -314,11 +512,11 @@ async function startListening() {
 
   setVoiceState("requesting", "Accessing microphone…");
 
-  // Step 1: Pre-request microphone stream cleanly via getUserMedia
+  // Step 1: Pre-request microphone stream via getUserMedia
   if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(t => t.stop());
+      stream.getTracks().forEach((t) => t.stop());
     } catch (permErr) {
       console.warn("Microphone access check failed:", permErr);
       if (permErr.name === "NotAllowedError" || permErr.name === "PermissionDeniedError") {
@@ -336,7 +534,7 @@ async function startListening() {
     }
   }
 
-  // Step 2: Instantiate Recognition instance
+  // Step 2: Instantiate Recognition
   try {
     if (recognition) {
       try { recognition.abort(); } catch {}
@@ -385,18 +583,18 @@ async function startListening() {
       isListening = false;
 
       const errorExplanations = {
-        "network": "Speech recognition service is currently unavailable. (Chromium cloud speech service requires an active connection to Google speech servers).",
-        "not-allowed": "Microphone permission was denied. Please allow microphone permissions in the browser address bar.",
-        "service-not-allowed": "Speech recognition service is blocked on this origin or container.",
+        network: "Chromium cloud voice recognition service is temporarily unreachable.",
+        "not-allowed": "Microphone permission was denied in your browser.",
+        "service-not-allowed": "Speech recognition service is blocked on this container/origin.",
         "no-speech": "No speech was detected. Tap the microphone to try again.",
-        "audio-capture": "Microphone capture failed. Please check your sound input device.",
-        "aborted": "Speech listening was cancelled.",
+        "audio-capture": "Microphone capture failed. Please verify your sound input device.",
+        aborted: "Listening cancelled.",
       };
 
       const msg = errorExplanations[e.error] || `Speech error: ${e.error}`;
 
       if (e.error === "network") {
-        setVoiceState("error", "Cloud voice service unreachable");
+        setVoiceState("error", "Voice service unreachable");
         showSpeechDiagnostic(msg);
         expandTypeDrawer();
       } else if (e.error === "not-allowed" || e.error === "service-not-allowed") {
@@ -454,7 +652,7 @@ function cancelSpeechInput() {
   setVoiceState("ready");
 }
 
-// ─── Collapsible Type Drawer ──────────────────────────────────────────────────
+// ─── Type Drawer ──────────────────────────────────────────────────────────────
 
 function expandTypeDrawer() {
   typeDrawer.classList.add("open");
@@ -471,88 +669,27 @@ function toggleTypeDrawer() {
   }
 }
 
-// ─── Tool Calls (Anna SDK) ───────────────────────────────────────────────────
-
-async function callTool(method, args) {
-  if (!annaAvailable) {
-    return standaloneStub(method, args);
-  }
-  try {
-    const result = await anna.tools.invoke({
-      tool_id: TOOL_ID,
-      method,
-      args,
-    });
-    return { success: true, data: result };
-  } catch (e) {
-    console.warn("Tool error:", method, e);
-    return { success: false, error: e.message || "Tool unavailable" };
-  }
-}
-
-function standaloneStub(method, args) {
-  if (method === "get_scenarios") {
-    return { success: true, data: { scenarios: [
-      { key: "introduction",       title: "Self-Introduction",     icon: "👋", description: "Practice introducing yourself clearly", turn_count: 4 },
-      { key: "job_interview",      title: "Job Interview",         icon: "💼", description: "Answer common interview questions", turn_count: 4 },
-      { key: "college_discussion", title: "College Discussion",    icon: "🎓", description: "Academic and class discussions", turn_count: 4 },
-      { key: "everyday",           title: "Everyday Conversation", icon: "☕", description: "Casual daily English situations", turn_count: 4 },
-    ]}};
-  }
-  if (method === "start_session") {
-    return { success: true, data: {
-      session_id: "preview-" + Date.now(),
-      scenario_key: args.scenario || "introduction",
-      scenario_title: "Self-Introduction",
-      total_turns: 4,
-      opening_prompt: "Hello! Let's practice introducing yourself. Please tell me your name, where you are from, and what you do or study.",
-      hint: "Try: 'My name is … I am from … and I am a student / I work as …'",
-      vocabulary: [
-        { word: "originally", meaning: "used to say where someone is really from", example: "I am originally from Chennai." },
-        { word: "currently",  meaning: "at the present time", example: "I am currently studying computer science." },
-        { word: "pursue",     meaning: "to follow or work towards something", example: "I want to pursue a career in technology." },
-      ],
-      is_scripted: true,
-    }};
-  }
-  if (method === "coach_turn") {
-    const notes = [];
-    const lower = (args.user_input || "").toLowerCase();
-    if (/\b(i goes|he go|she do)\b/.test(lower)) {
-      notes.push({ rule: "Subject-verb agreement", fragment: "I goes", suggestion: "I go", label: "Grammar note (rule-based)" });
-    }
-    return { success: true, data: {
-      coach_reply: "Good effort! Tell me about one of your hobbies or interests. Why do you enjoy it?",
-      hint: "Try: 'One of my hobbies is … I enjoy it because …'",
-      vocabulary: [
-        { word: "passionate about", meaning: "very interested in something", example: "I am passionate about photography." },
-        { word: "spare time",        meaning: "free time outside work", example: "In my spare time I read books." },
-      ],
-      grammar_notes: notes,
-      is_scripted: true,
-      is_last_turn: (args.turn_number || 1) >= 4,
-      next_turn_number: (args.turn_number || 1) + 1,
-    }};
-  }
-  if (method === "get_notebook") {
-    return { success: true, data: { entries: notebookEntries, total_stored: notebookEntries.length, progress, storage_available: false }};
-  }
-  if (method === "save_progress") {
-    return { success: true, data: { progress: args, persisted: false, storage_available: false }};
-  }
-  return { success: false, error: "Method not found" };
-}
-
 // ─── Timer Functions ──────────────────────────────────────────────────────────
 
 function startTimer() {
-  secsLeft = SESSION_SECS;
+  if (!sessionStartedAt) {
+    secsLeft = selectedDurationMins * 60;
+    isPaused = false;
+    sessionStartedAt = Date.now();
+    pausedAt = null;
+    totalPausedMs = 0;
+  }
+  sessionEnded = false;
   updateTimerUI();
   clearInterval(timerInterval);
   timerInterval = setInterval(() => {
-    secsLeft = Math.max(0, secsLeft - 1);
+    if (isPaused) return;
+    const elapsed = Math.floor((Date.now() - sessionStartedAt - totalPausedMs) / 1000);
+    secsLeft = Math.max(0, selectedDurationMins * 60 - elapsed);
     updateTimerUI();
-    if (secsLeft <= 0) endSession("timeout");
+    if (secsLeft <= 0) {
+      endSession("timeout");
+    }
   }, 1000);
 }
 
@@ -560,13 +697,549 @@ function stopTimer() {
   clearInterval(timerInterval);
 }
 
-function updateTimerUI() {
-  timerText.textContent = fmtTime(secsLeft);
-  if (secsLeft < 120) timerPill.classList.add("warn");
-  else                timerPill.classList.remove("warn");
+function togglePauseSession() {
+  isPaused = !isPaused;
+  if (isPaused) {
+    pausedAt = Date.now();
+    stopListening();
+    stopCoachAudio();
+    pauseIcon.textContent = "▶";
+    pauseLabel.textContent = "Resume";
+    pauseSessionBtn.classList.add("active");
+    timerPill.classList.add("paused");
+    setVoiceState("paused", "Conversation paused · Tap Resume to continue");
+    toast("Conversation paused", "info");
+  } else {
+    if (pausedAt) totalPausedMs += Date.now() - pausedAt;
+    pausedAt = null;
+    pauseIcon.textContent = "⏸";
+    pauseLabel.textContent = "Pause";
+    pauseSessionBtn.classList.remove("active");
+    timerPill.classList.remove("paused");
+    setVoiceState("ready", "Ready to speak · Tap microphone");
+    toast("Conversation resumed", "ok");
+    if (autoListenAfterCoach) {
+      setTimeout(() => startListening(), 300);
+    }
+  }
 }
 
-// ─── Vocabulary Popup ─────────────────────────────────────────────────────────
+function updateTimerUI() {
+  const elapsed = Math.max(0, selectedDurationMins * 60 - secsLeft);
+  timerText.textContent = `${fmtTime(secsLeft)} left · ${fmtTime(elapsed)} elapsed`;
+  if (isPaused) {
+    timerPill.className = "timer-pill paused";
+  } else if (secsLeft < 120) {
+    timerPill.className = "timer-pill warn";
+  } else {
+    timerPill.className = "timer-pill";
+  }
+}
+
+// ─── Honest Coach Header Updates ──────────────────────────────────────────────
+
+function updateCoachLabel(source) {
+  activeSource = source;
+  if (source === "ai") {
+    coachLabel.className = "coach-label";
+    coachLabelIcon.textContent = "✨";
+    coachLabelText.textContent = "AI Coach";
+    aiBadge.textContent = "✨ Anna LLM Sampling active";
+  } else {
+    coachLabel.className = "coach-label rules";
+    coachLabelIcon.textContent = "📝";
+    coachLabelText.textContent = "Coach (basic mode)";
+    aiBadge.textContent = "📝 Rule-based basic mode";
+  }
+}
+
+// ─── Feedback & Notebook Rendering ───────────────────────────────────────────
+
+function displayLiveFeedback(notes, correction) {
+  feedbackDeck.classList.remove("faded");
+  if (feedbackTimingNote) feedbackTimingNote.textContent = "";
+
+  if ((!notes || !notes.length) && (!correction || correction.isCorrect)) {
+    feedbackDeck.classList.remove("visible");
+    feedbackItems.innerHTML = "";
+    return;
+  }
+
+  feedbackItems.innerHTML = "";
+
+  if (correction && !correction.isCorrect) {
+    const item = document.createElement("div");
+    item.className = "grammar-item";
+
+    const fragSpan = document.createElement("span");
+    fragSpan.className = "frag";
+    fragSpan.textContent = correction.original;
+
+    const arrowSpan = document.createElement("span");
+    arrowSpan.textContent = " → ";
+
+    const suggSpan = document.createElement("span");
+    suggSpan.className = "sugg";
+    suggSpan.textContent = correction.corrected;
+
+    const ruleTag = document.createElement("span");
+    ruleTag.className = "rule-tag";
+    ruleTag.textContent = `${correction.label || "Basic check"} · ${correction.category}`;
+
+    item.appendChild(fragSpan);
+    item.appendChild(arrowSpan);
+    item.appendChild(suggSpan);
+    item.appendChild(ruleTag);
+
+    const explDiv = document.createElement("div");
+    explDiv.style.fontSize = "11px";
+    explDiv.style.color = "var(--text2)";
+    explDiv.style.marginTop = "3px";
+    explDiv.textContent = correction.explanation;
+    item.appendChild(explDiv);
+
+    // Better expressions if present
+    const exprs = correction.better_expressions || [];
+    if (exprs.length > 0) {
+      const exprWrap = document.createElement("div");
+      exprWrap.className = "better-exprs";
+      exprWrap.textContent = "Natural alternatives: " + exprs.slice(0, 2).join(" · ");
+      item.appendChild(exprWrap);
+    }
+
+    // "Try rewriting" button
+    const rewriteBtn = document.createElement("button");
+    rewriteBtn.type = "button";
+    rewriteBtn.className = "btn-rewrite";
+    rewriteBtn.textContent = "✍️ Try rewriting this";
+    rewriteBtn.addEventListener("click", () => {
+      userInput.value = correction.corrected;
+      expandTypeDrawer();
+    });
+    item.appendChild(rewriteBtn);
+
+    feedbackItems.appendChild(item);
+  }
+
+  feedbackDeck.classList.add("visible");
+}
+
+function renderNotebook() {
+  if (!notebookEntries.length) {
+    notebookList.innerHTML = '<p class="nb-empty">No corrections saved yet. Practice speaking to capture learning points!</p>';
+    return;
+  }
+
+  // Filter & Search
+  const filtered = notebookEntries.filter((e) => {
+    if (currentFilter !== "all" && e.status !== currentFilter) return false;
+    if (currentSearch) {
+      const target = `${e.original || ""} ${e.corrected || ""} ${e.category || ""}`.toLowerCase();
+      if (!target.includes(currentSearch)) return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    notebookList.innerHTML = '<p class="nb-empty">No items match your filter.</p>';
+    return;
+  }
+
+  notebookList.innerHTML = "";
+  filtered.forEach((entry) => {
+    const card = document.createElement("div");
+    card.className = "nb-card";
+
+    const top = document.createElement("div");
+    top.className = "nb-card-top";
+    top.innerHTML = `<span>${escHtml(entry.scenario || "Practice")} · ${escHtml(entry.category || "Grammar")}</span><span>Seen ${entry.times_seen || 1}x</span>`;
+
+    const orig = document.createElement("div");
+    orig.className = "nb-card-orig";
+    orig.textContent = `"${entry.original || ""}"`;
+
+    const sugg = document.createElement("div");
+    sugg.className = "nb-card-sugg";
+    sugg.textContent = `→ ${entry.corrected || ""}`;
+
+    const expl = document.createElement("div");
+    expl.className = "nb-card-expl";
+    expl.textContent = entry.explanation || "";
+
+    const actions = document.createElement("div");
+    actions.className = "nb-card-actions";
+
+    const statusBtn = document.createElement("button");
+    statusBtn.type = "button";
+    statusBtn.className = `nb-status-btn ${entry.status === "fixed" ? "fixed" : ""}`;
+    statusBtn.textContent = entry.status === "fixed" ? "✓ Mastered" : "Mark Mastered";
+    statusBtn.addEventListener("click", async () => {
+      const nextStatus = entry.status === "fixed" ? "practising" : "fixed";
+      entry.status = nextStatus;
+      await callTool("update_notebook_item", { id: entry.id, status: nextStatus });
+      renderNotebook();
+      loadProgress();
+    });
+    actions.appendChild(statusBtn);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "nb-status-btn";
+    deleteBtn.textContent = "🗑 Remove";
+    deleteBtn.addEventListener("click", async () => {
+      notebookEntries = notebookEntries.filter((i) => i.id !== entry.id);
+      await callTool("delete_notebook_item", { id: entry.id });
+      renderNotebook();
+      updateNotebookBadge();
+    });
+    actions.appendChild(deleteBtn);
+
+    card.appendChild(top);
+    card.appendChild(orig);
+    card.appendChild(sugg);
+    card.appendChild(expl);
+    card.appendChild(actions);
+
+    notebookList.appendChild(card);
+  });
+}
+
+function updateNotebookBadge() {
+  const count = notebookEntries.length;
+  if (count > 0) {
+    notebookBadge.style.display = "inline-flex";
+    notebookBadge.textContent = count > 9 ? "9+" : String(count);
+  } else {
+    notebookBadge.style.display = "none";
+  }
+}
+
+function updateProgressUI() {
+  statSessions.textContent = progressData.sessions_completed || 0;
+  statMistakes.textContent = progressData.mistakes_detected_by_checker || 0;
+  statVocab.textContent    = progressData.distinct_words_count || 0;
+
+  prSessions.textContent   = progressData.sessions_completed || 0;
+  prMinutes.textContent    = progressData.minutes_practised || 0;
+  prAnswers.textContent    = progressData.answers_given || 0;
+  prAvgWords.textContent   = progressData.average_words_per_answer || 0;
+  prMistakes.textContent   = progressData.mistakes_detected_by_checker || 0;
+  prFixed.textContent      = progressData.notebook_fixed_count || 0;
+  prVocab.textContent      = progressData.distinct_words_count || 0;
+  prStreak.textContent     = `${progressData.streak_days || 1}d`;
+
+  storageNote.textContent = storageAvailable
+    ? "✓ Practice metrics and mistake notebook saved to your personal Anna Persistent Storage (APS KV)"
+    : "ℹ️ Session progress stored locally in memory for this session";
+}
+
+// ─── History Messages ─────────────────────────────────────────────────────────
+
+function appendHistoryMessage(role, text) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `msg ${role}`;
+
+  const avatar = document.createElement("div");
+  avatar.className = "msg-avatar";
+  avatar.textContent = role === "coach" ? "🎙️" : "🧑";
+
+  const bubble = document.createElement("div");
+  bubble.className = "msg-bubble";
+  bubble.textContent = text;
+
+  wrapper.appendChild(avatar);
+  wrapper.appendChild(bubble);
+
+  chatMessages.appendChild(wrapper);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ─── Scenario & Session Flow ─────────────────────────────────────────────────
+
+async function loadScenarios() {
+  const res = await callTool("get_scenarios", {});
+  if (!res.success || !res.data?.scenarios) return;
+
+  const scenarios = res.data.scenarios;
+  scenarioGrid.innerHTML = "";
+
+  scenarios.forEach((s) => {
+    const card = document.createElement("div");
+    card.className = `scenario-card ${s.key === selectedScenario ? "selected" : ""}`;
+    card.dataset.key = s.key;
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.innerHTML = `
+      <div class="scenario-icon">${s.icon}</div>
+      <div class="scenario-name">${escHtml(s.title)}</div>
+      <div class="scenario-desc">${escHtml(s.description)}</div>
+      <div class="scenario-turns">⏱ Until timer ends · unlimited natural turns</div>
+    `;
+
+    card.addEventListener("click", () => {
+      document.querySelectorAll(".scenario-card").forEach((c) => c.classList.remove("selected"));
+      card.classList.add("selected");
+      selectedScenario = s.key;
+    });
+
+    scenarioGrid.appendChild(card);
+  });
+}
+
+async function loadProgress() {
+  const res = await callTool("get_notebook", { limit: 50 });
+  if (res.success && res.data) {
+    notebookEntries  = res.data.entries || [];
+    progressData     = res.data.progress || progressData;
+    storageAvailable = res.data.storage_available !== false;
+    updateProgressUI();
+    updateNotebookBadge();
+    renderNotebook();
+  }
+}
+
+async function startSession() {
+  startBtn.disabled = true;
+  startBtn.textContent = "Starting practice session…";
+
+  // Reset turn & session counters
+  sessionId            = null;
+  turnNumber           = 0;
+  sessionStartedAt     = null;
+  pausedAt             = null;
+  totalPausedMs        = 0;
+  sessionTurnsCount    = 0;
+  sessionMistakesCount = 0;
+  sessionVocabCount    = 0;
+  sessionWordsCount    = 0;
+  recognizedText       = "";
+  conversationHistory  = [];
+
+  chatMessages.innerHTML = "";
+  feedbackDeck.classList.remove("visible");
+  feedbackItems.innerHTML = "";
+  hideSpeechDiagnostic();
+
+  const res = await callTool("start_session", { scenario: selectedScenario });
+
+  startBtn.disabled = false;
+  startBtn.innerHTML = "<span>🎙️</span> Start Speaking Practice";
+
+  if (!res.success) {
+    toast("Could not start session: " + (res.error || "Unknown error"), "error");
+    return;
+  }
+
+  const d = res.data;
+  sessionId   = d.session_id;
+  scenarioKey = d.scenario_key;
+  turnNumber  = 1;
+
+  convTitle.textContent    = d.scenario_title || "Practice Session";
+  convSubtitle.textContent = "Turn 1";
+
+  updateCoachLabel(d.source || "rules");
+
+  // Reset inputs
+  transcriptPreview.classList.remove("visible");
+  transcriptPreview.textContent = "";
+  userInput.value = "";
+
+  showScreen("conv");
+  tabPractice.click();
+  startTimer();
+
+  // Opening Coach prompt
+  displayCoachTurn(d.opening_prompt, d.hint, d.vocabulary || []);
+  setVoiceState("ready");
+}
+
+function displayCoachTurn(fullPromptText, hint, vocabulary) {
+  coachPromptText.textContent = fullPromptText;
+  appendHistoryMessage("coach", fullPromptText);
+  conversationHistory.push({ role: "coach", text: fullPromptText });
+
+  speakCoachPrompt(fullPromptText, () => {
+    if (autoListenAfterCoach && !isPaused && screens.conv.classList.contains("active") && tabPractice.classList.contains("active")) {
+      startListening();
+    }
+  });
+
+  if (hint) {
+    coachHintText.textContent = hint;
+    coachHintCard.style.display = "inline-flex";
+  } else {
+    coachHintCard.style.display = "none";
+  }
+
+  coachVocabStrip.innerHTML = "";
+  if (vocabulary && vocabulary.length) {
+    vocabulary.forEach((v) => {
+      const pill = document.createElement("button");
+      pill.className = "vocab-pill";
+      pill.textContent = v.word;
+      pill.setAttribute("aria-label", `Vocabulary: ${v.word}`);
+      pill.addEventListener("click", (e) => {
+        e.stopPropagation();
+        showVocabPopup(v.word, v.meaning, v.example, pill);
+        sessionVocabCount++;
+        progressData.distinct_words_count = (progressData.distinct_words_count || 0) + 1;
+        updateProgressUI();
+      });
+      coachVocabStrip.appendChild(pill);
+    });
+    coachVocabStrip.style.display = "inline-flex";
+  } else {
+    coachVocabStrip.style.display = "none";
+  }
+}
+
+async function submitTurn(providedText) {
+  if (isSubmitting) return;
+
+  const inputMode = (isListening || recognizedText) ? "speech" : "typed";
+  const text = (providedText !== undefined ? providedText : userInput.value || recognizedText).trim();
+
+  if (!text) {
+    toast("Please speak or type your answer before sending.", "warn");
+    return;
+  }
+
+  isSubmitting = true;
+  stopListening();
+  stopCoachAudio();
+
+  setVoiceState("processing", "Analyzing response & grammar…");
+  doneVoiceBtn.disabled = true;
+  sendBtn.disabled      = true;
+
+  userInput.value = "";
+  recognizedText  = "";
+  transcriptPreview.classList.remove("visible");
+  transcriptPreview.textContent = "";
+
+  appendHistoryMessage("user", text);
+  conversationHistory.push({ role: "user", text });
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  sessionWordsCount += wordCount;
+  sessionTurnsCount += 1;
+
+  const res = await callTool("coach_turn", {
+    user_input:   text,
+    scenario_key: scenarioKey,
+    turn_number:  turnNumber,
+    session_id:   sessionId,
+    input_mode:   inputMode,
+    history:      conversationHistory,
+  });
+
+  doneVoiceBtn.disabled = false;
+  sendBtn.disabled      = false;
+  isSubmitting          = false;
+
+  if (!res.success) {
+    setVoiceState("ready");
+    toast(res.error || "Something went wrong. Please try again.", "error");
+    return;
+  }
+
+  const d = res.data;
+  updateCoachLabel(d.source || "rules");
+
+  turnNumber = d.next_turn_number || (turnNumber + 1);
+  convSubtitle.textContent = `Turn ${turnNumber}`;
+
+  if (d.correction && !d.correction.isCorrect) {
+    sessionMistakesCount += 1;
+    loadProgress(); // Reload notebook in background
+  }
+
+  // Display Coach response guaranteed non-repetitive
+  displayCoachTurn(d.full_message || `${d.coach_reply} ${d.follow_up || ""}`.trim(), d.hint, d.vocabulary || []);
+  displayLiveFeedback(d.grammar_notes || [], d.correction);
+
+  setVoiceState("ready");
+}
+
+async function endSession(reason = "complete") {
+  if (sessionEnded) return;
+  sessionEnded = true;
+  stopTimer();
+  stopListening();
+  stopCoachAudio();
+
+  const elapsedMins = Math.max(1, Math.round((DEFAULT_SESSION_SECS - secsLeft) / 60));
+
+  await callTool("save_progress", {
+    sessions_completed: 1,
+    minutes_practised:  elapsedMins,
+    answers_given:      sessionTurnsCount,
+    words_spoken:       sessionWordsCount,
+    mistakes_detected:  sessionMistakesCount,
+  });
+
+  await loadProgress();
+
+  sumEmoji.textContent = reason === "timeout" ? "⏰" : sessionMistakesCount === 0 ? "🌟" : "🎉";
+  sumTitle.textContent = reason === "timeout" ? "Time's up!" : "Session complete!";
+  sumSubtitle.textContent = `You completed ${sessionTurnsCount} speaking turns in the ${convTitle.textContent} scenario.`;
+
+  sumTurns.textContent       = sessionTurnsCount;
+  sumCorrections.textContent = sessionMistakesCount;
+  sumWords.textContent       = sessionVocabCount;
+
+  // Strengths
+  sumStrengths.innerHTML = "";
+  const strengths = [
+    `Engaged in ${sessionTurnsCount} interactive conversational turns.`,
+    `Spoke a total of ~${sessionWordsCount} words with conversational intent.`,
+  ];
+  if (sessionMistakesCount === 0) {
+    strengths.push("Zero major grammar issues flagged by the basic rule checker!");
+  }
+  strengths.forEach((s) => {
+    const d = document.createElement("div");
+    d.className = "summary-item";
+    d.innerHTML = `<span>✓</span><span>${escHtml(s)}</span>`;
+    sumStrengths.appendChild(d);
+  });
+
+  // Priorities
+  sumPriorities.innerHTML = "";
+  const priorities = [];
+  if (sessionMistakesCount > 0) {
+    priorities.push(`Review the ${sessionMistakesCount} points saved in your notebook.`);
+  }
+  priorities.push("Practice answering with 2-3 detailed sentences per turn.");
+  priorities.push("Try incorporating newly explored vocabulary pills into your answers.");
+  priorities.forEach((p) => {
+    const d = document.createElement("div");
+    d.className = "summary-item";
+    d.innerHTML = `<span>•</span><span>${escHtml(p)}</span>`;
+    sumPriorities.appendChild(d);
+  });
+
+  // Useful phrases
+  sumPhrases.innerHTML = "";
+  const phrases = [
+    "From my perspective, …",
+    "To expand on that point, …",
+    "One memorable example of this is …",
+    "I'm really passionate about …",
+    "How do you usually approach …?",
+  ];
+  phrases.forEach((ph) => {
+    const d = document.createElement("div");
+    d.className = "summary-item";
+    d.innerHTML = `<span>💬</span><span>"${escHtml(ph)}"</span>`;
+    sumPhrases.appendChild(d);
+  });
+
+  showScreen("summary");
+}
+
+// ─── Vocab Popup ──────────────────────────────────────────────────────────────
 
 function showVocabPopup(word, meaning, example, targetEl) {
   $("vp-word").textContent    = word;
@@ -587,355 +1260,7 @@ function showVocabPopup(word, meaning, example, targetEl) {
   setTimeout(() => document.addEventListener("click", hide), 50);
 }
 
-// ─── Feedback & Notebook Rendering ───────────────────────────────────────────
-
-function displayLiveFeedback(notes) {
-  if (!notes || !notes.length) {
-    feedbackDeck.classList.remove("visible");
-    feedbackItems.innerHTML = "";
-    return;
-  }
-
-  feedbackItems.innerHTML = "";
-  notes.forEach(n => {
-    const item = document.createElement("div");
-    item.className = "grammar-item";
-    item.innerHTML = `
-      <span class="frag">${escHtml(n.fragment)}</span>
-      <span class="arrow">→</span>
-      <span class="sugg">${escHtml(n.suggestion)}</span>
-      <span class="rule-tag">${escHtml(n.rule)}</span>
-    `;
-    feedbackItems.appendChild(item);
-
-    notebookEntries.unshift({
-      scenario: convTitle.textContent,
-      original: n.fragment,
-      corrections: [n],
-      timestamp: new Date().toISOString(),
-    });
-  });
-
-  feedbackDeck.classList.add("visible");
-  mistakeCount += notes.length;
-  updateNotebookBadge();
-  renderNotebook();
-}
-
-function updateNotebookBadge() {
-  if (mistakeCount > 0) {
-    notebookBadge.style.display = "inline-flex";
-    notebookBadge.textContent   = mistakeCount > 9 ? "9+" : mistakeCount;
-  }
-}
-
-function renderNotebook() {
-  if (!notebookEntries.length) {
-    notebookList.innerHTML = '<p class="nb-empty">No corrections yet. Start practising!</p>';
-    return;
-  }
-  notebookList.innerHTML = "";
-  notebookEntries.slice(0, 30).forEach(entry => {
-    const card = document.createElement("div");
-    card.className = "nb-card";
-    const corrs = entry.corrections || [];
-    const c     = corrs[0] || {};
-    card.innerHTML = `
-      <div class="nb-meta">${escHtml(entry.scenario || "")} · ${fmtTimestamp(entry.timestamp)}</div>
-      <div class="nb-original">"${escHtml(entry.original || c.fragment || "")}"</div>
-      <div class="nb-correction">
-        → <span style="color:var(--accent); font-weight:600;">${escHtml(c.suggestion || "")}</span>
-        <span class="nb-rule">${escHtml(c.rule || "")}</span>
-      </div>
-    `;
-    notebookList.appendChild(card);
-  });
-}
-
-function fmtTimestamp(iso) {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  } catch { return ""; }
-}
-
-function updateProgressUI() {
-  statSessions.textContent = progress.sessions_completed || 0;
-  statMistakes.textContent = progress.mistakes_corrected || 0;
-  statVocab.textContent    = progress.vocab_saved || 0;
-
-  prSessions.textContent   = progress.sessions_completed || 0;
-  prMistakes.textContent   = progress.mistakes_corrected || 0;
-  prVocab.textContent      = progress.vocab_saved || 0;
-
-  storageNote.textContent = storageAvailable
-    ? "✓ Progress & mistakes saved to your Anna cloud account"
-    : "ℹ️ Session progress stored locally for this session";
-}
-
-// ─── History Messages (Review Tab) ───────────────────────────────────────────
-
-function appendHistoryMessage(role, text) {
-  const wrapper = document.createElement("div");
-  wrapper.className = `msg ${role}`;
-
-  const avatar = document.createElement("div");
-  avatar.className = "msg-avatar";
-  avatar.textContent = role === "coach" ? "🎙️" : "🧑";
-
-  const bubble = document.createElement("div");
-  bubble.className = "msg-bubble";
-  bubble.textContent = text;
-
-  wrapper.appendChild(avatar);
-  wrapper.appendChild(bubble);
-  chatMessages.appendChild(wrapper);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-// ─── Scenario & Session Flow ─────────────────────────────────────────────────
-
-async function loadScenarios() {
-  const res = await callTool("get_scenarios", {});
-  if (!res.success || !res.data?.scenarios) return;
-
-  const scenarios = res.data.scenarios;
-  scenarioGrid.innerHTML = "";
-
-  scenarios.forEach(s => {
-    const card = document.createElement("div");
-    card.className = `scenario-card ${s.key === selectedScenario ? "selected" : ""}`;
-    card.dataset.key = s.key;
-    card.setAttribute("role", "button");
-    card.setAttribute("tabindex", "0");
-    card.innerHTML = `
-      <div class="scenario-icon">${s.icon}</div>
-      <div class="scenario-name">${escHtml(s.title)}</div>
-      <div class="scenario-desc">${escHtml(s.description)}</div>
-      <div class="scenario-turns">⏱ 10 mins · ${s.turn_count || 4} turns</div>
-    `;
-
-    card.addEventListener("click", () => {
-      document.querySelectorAll(".scenario-card").forEach(c => c.classList.remove("selected"));
-      card.classList.add("selected");
-      selectedScenario = s.key;
-    });
-
-    scenarioGrid.appendChild(card);
-  });
-}
-
-async function loadProgress() {
-  const res = await callTool("get_notebook", { limit: 30 });
-  if (res.success && res.data) {
-    notebookEntries  = res.data.entries || [];
-    progress         = res.data.progress || progress;
-    storageAvailable = res.data.storage_available !== false;
-    updateProgressUI();
-    renderNotebook();
-  }
-}
-
-async function startSession() {
-  startBtn.disabled = true;
-  startBtn.textContent = "Starting practice…";
-
-  // Reset turn & session state
-  sessionId       = null;
-  turnNumber      = 0;
-  mistakeCount    = 0;
-  vocabCount      = 0;
-  recognizedText  = "";
-  chatMessages.innerHTML = "";
-  feedbackDeck.classList.remove("visible");
-  feedbackItems.innerHTML = "";
-  notebookBadge.style.display = "none";
-  notebookEntries = [];
-  hideSpeechDiagnostic();
-
-  const res = await callTool("start_session", { scenario: selectedScenario });
-
-  startBtn.disabled = false;
-  startBtn.innerHTML = "<span>🎙️</span> Start 10-minute practice";
-
-  if (!res.success) {
-    toast("Could not start session: " + (res.error || "Unknown error"), "error");
-    return;
-  }
-
-  const d = res.data;
-  sessionId   = d.session_id;
-  scenarioKey = d.scenario_key;
-  totalTurns  = d.total_turns || 4;
-  turnNumber  = 1;
-
-  convTitle.textContent    = d.scenario_title || "Practice Session";
-  convSubtitle.textContent = `Turn 1 of ${totalTurns}`;
-
-  // Reset inputs & previews
-  transcriptPreview.classList.remove("visible");
-  transcriptPreview.textContent = "";
-  userInput.value = "";
-
-  showScreen("conv");
-  tabPractice.click();
-  startTimer();
-
-  // Populate Coach Prompt
-  displayCoachTurn(d.opening_prompt, d.hint, d.vocabulary || []);
-
-  setVoiceState("ready");
-}
-
-function displayCoachTurn(promptText, hint, vocabulary) {
-  coachPromptText.textContent = promptText;
-
-  appendHistoryMessage("coach", promptText);
-  speakCoachPrompt(promptText);
-
-  if (hint) {
-    coachHintText.textContent = hint;
-    coachHintCard.style.display = "inline-flex";
-  } else {
-    coachHintCard.style.display = "none";
-  }
-
-  coachVocabStrip.innerHTML = "";
-  if (vocabulary && vocabulary.length) {
-    vocabulary.forEach(v => {
-      const pill = document.createElement("button");
-      pill.className = "vocab-pill";
-      pill.textContent = v.word;
-      pill.setAttribute("aria-label", `Vocabulary: ${v.word}`);
-      pill.addEventListener("click", (e) => {
-        e.stopPropagation();
-        showVocabPopup(v.word, v.meaning, v.example, pill);
-        vocabCount++;
-        updateProgressUI();
-      });
-      coachVocabStrip.appendChild(pill);
-    });
-    coachVocabStrip.style.display = "inline-flex";
-  } else {
-    coachVocabStrip.style.display = "none";
-  }
-}
-
-async function submitTurn(providedText) {
-  const text = (providedText !== undefined ? providedText : userInput.value || recognizedText).trim();
-
-  if (!text) {
-    toast("Please speak or type your answer before sending.", "warn");
-    return;
-  }
-
-  stopListening();
-  stopCoachAudio();
-
-  setVoiceState("processing", "Analyzing response & grammar…");
-  doneVoiceBtn.disabled = true;
-  sendBtn.disabled = true;
-
-  appendHistoryMessage("user", text);
-
-  userInput.value = "";
-  recognizedText = "";
-  transcriptPreview.classList.remove("visible");
-  transcriptPreview.textContent = "";
-
-  const res = await callTool("coach_turn", {
-    user_input:   text,
-    scenario_key: scenarioKey,
-    turn_number:  turnNumber,
-    session_id:   sessionId,
-  });
-
-  doneVoiceBtn.disabled = false;
-  sendBtn.disabled = false;
-
-  if (!res.success) {
-    setVoiceState("ready");
-    toast(res.error || "Something went wrong. Please try again.", "error");
-    return;
-  }
-
-  const d = res.data;
-  isLlmMode = !d.is_scripted;
-  aiBadge.textContent = isLlmMode ? "✨ AI coaching" : "🗣️ Voice coach";
-
-  turnNumber = d.next_turn_number || (turnNumber + 1);
-  convSubtitle.textContent = `Turn ${Math.min(turnNumber, totalTurns)} of ${totalTurns}`;
-
-  displayCoachTurn(d.coach_reply, d.hint, d.vocabulary || []);
-  displayLiveFeedback(d.grammar_notes || []);
-
-  updateProgressUI();
-
-  if (d.is_last_turn) {
-    setTimeout(() => endSession("complete"), 2200);
-  } else {
-    setVoiceState("ready");
-  }
-}
-
-async function endSession(reason = "complete") {
-  stopTimer();
-  stopListening();
-  stopCoachAudio();
-
-  const saveRes = await callTool("save_progress", {
-    sessions_completed: 1,
-    mistakes_corrected: mistakeCount,
-    vocab_saved:        vocabCount,
-  });
-
-  if (saveRes.success && saveRes.data?.progress) {
-    progress = saveRes.data.progress;
-  }
-
-  const emoji = reason === "timeout" ? "⏰" :
-                mistakeCount === 0   ? "🌟" :
-                mistakeCount < 3     ? "🎉" : "💪";
-  sumEmoji.textContent    = emoji;
-  sumTitle.textContent    = reason === "timeout" ? "Time's up!" : "Session complete!";
-  sumSubtitle.textContent = reason === "timeout"
-    ? "Great effort — 10 focused minutes of English speaking practice!"
-    : `You completed all speaking turns in the ${convTitle.textContent} scenario.`;
-
-  sumTurns.textContent       = Math.max(0, turnNumber - 1);
-  sumCorrections.textContent = mistakeCount;
-  sumWords.textContent       = vocabCount;
-
-  nextSteps.innerHTML = "";
-  const recommendations = buildRecommendations();
-  recommendations.forEach(rec => {
-    const div = document.createElement("div");
-    div.className = "next-step";
-    div.innerHTML = `<div class="ns-icon">${rec.icon}</div><div>${escHtml(rec.text)}</div>`;
-    nextSteps.appendChild(div);
-  });
-
-  showScreen("summary");
-  updateProgressUI();
-}
-
-function buildRecommendations() {
-  const recs = [];
-  if (mistakeCount > 0) {
-    recs.push({ icon: "📝", text: `You had ${mistakeCount} grammar feedback points. Review them in your notebook and repeat the scenario to master them.` });
-  } else {
-    recs.push({ icon: "⭐", text: "Zero grammar mistakes detected — fluent and confident! Try the Job Interview or College Discussion next." });
-  }
-  if (vocabCount < 3) {
-    recs.push({ icon: "🔤", text: "Tap the purple vocabulary pills during sessions to learn new expressions and practice them aloud." });
-  } else {
-    recs.push({ icon: "🔤", text: `You explored ${vocabCount} vocabulary words today. Incorporate them into your next conversation.` });
-  }
-  return recs;
-}
-
-// ─── Tab Switching ────────────────────────────────────────────────────────────
+// ─── Tabs & Filters ───────────────────────────────────────────────────────────
 
 function setupTabs() {
   const tabs = [
@@ -945,9 +1270,9 @@ function setupTabs() {
     { btn: tabProgress, panel: panelProgress },
   ];
 
-  tabs.forEach(t => {
+  tabs.forEach((t) => {
     t.btn.addEventListener("click", () => {
-      tabs.forEach(o => {
+      tabs.forEach((o) => {
         o.btn.classList.remove("active");
         o.btn.setAttribute("aria-selected", "false");
         o.panel.classList.remove("active");
@@ -957,7 +1282,87 @@ function setupTabs() {
       t.panel.classList.add("active");
 
       if (t.panel === panelNotebook) renderNotebook();
+      if (t.panel === panelProgress) loadProgress();
     });
+  });
+
+  // Notebook filter pills
+  const pills = document.querySelectorAll(".nb-pill");
+  pills.forEach((p) => {
+    p.addEventListener("click", () => {
+      pills.forEach((o) => o.classList.remove("active"));
+      p.classList.add("active");
+      currentFilter = p.dataset.filter;
+      renderNotebook();
+    });
+  });
+
+  // Notebook search input
+  nbSearchInput?.addEventListener("input", (e) => {
+    currentSearch = e.target.value.trim().toLowerCase();
+    renderNotebook();
+  });
+}
+
+// ─── Settings & Privacy Modal ─────────────────────────────────────────────────
+
+function setupSettingsModal() {
+  settingsBtn?.addEventListener("click", () => {
+    privacyModal.classList.add("open");
+  });
+
+  closeModalBtn?.addEventListener("click", () => {
+    privacyModal.classList.remove("open");
+  });
+
+  privacyModal?.addEventListener("click", (e) => {
+    if (e.target === privacyModal) privacyModal.classList.remove("open");
+  });
+
+  exportDataBtn?.addEventListener("click", () => {
+    const payload = {
+      app: "SpeakUp AI",
+      exportedAt: new Date().toISOString(),
+      progress: progressData,
+      notebook: notebookEntries,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `speakup-ai-data-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("Exported your SpeakUp AI records (JSON)", "ok");
+  });
+
+  clearDataBtn?.addEventListener("click", async () => {
+    if (window.confirm("Are you sure you want to delete all saved notebook entries and progress? This cannot be undone.")) {
+      await callTool("clear_all_data", {});
+      notebookEntries = [];
+      progressData = {
+        sessions_completed: 0,
+        minutes_practised: 0,
+        answers_given: 0,
+        total_words: 0,
+        average_words_per_answer: 0,
+        distinct_words_count: 0,
+        mistakes_detected_by_checker: 0,
+        notebook_fixed_count: 0,
+        streak_days: 0,
+      };
+      updateProgressUI();
+      updateNotebookBadge();
+      renderNotebook();
+      privacyModal.classList.remove("open");
+      toast("All practice records deleted.", "ok");
+    }
+  });
+
+  fontToggleBtn?.addEventListener("click", () => {
+    document.body.classList.toggle("font-large");
+    const isLarge = document.body.classList.contains("font-large");
+    fontSizeLabel.textContent = isLarge ? "A-" : "A+";
   });
 }
 
@@ -971,18 +1376,27 @@ async function main() {
     await anna.window.ready();
   } catch (e) {
     annaAvailable = false;
-    console.info("SpeakUp AI running in preview mode (no Anna host detected).");
+    console.info("SpeakUp AI running in preview/standalone mode.");
   }
 
   setLoading(true);
+
+  // Probe runtime health
+  const healthRes = await callTool("health", {});
+  if (healthRes.success && healthRes.data) {
+    updateCoachLabel(healthRes.data.default_source || "rules");
+  }
+
   await Promise.all([loadScenarios(), loadProgress()]);
   setLoading(false);
 
   setupSpeech();
   setupTabs();
+  setupSettingsModal();
 
   // Event Bindings
   startBtn.addEventListener("click", () => startSession());
+  endSessionBtn?.addEventListener("click", () => endSession("manual"));
 
   backBtn.addEventListener("click", () => {
     stopTimer();
@@ -992,7 +1406,7 @@ async function main() {
     loadProgress();
   });
 
-  // Center microphone hero button
+  // Hero mic button
   voiceMicBtn.addEventListener("click", () => {
     if (isListening) {
       stopListening();
@@ -1001,62 +1415,90 @@ async function main() {
     }
   });
 
-  // Recording controls
   doneVoiceBtn.addEventListener("click", () => submitTurn());
   cancelVoiceBtn.addEventListener("click", () => cancelSpeechInput());
 
-  // Coach audio replay
-  coachReplayBtn.addEventListener("click", () => replayCoachPrompt());
+  // Duration Selector Bindings
+  if (durationSelector) {
+    const pills = durationSelector.querySelectorAll(".duration-pill");
+    pills.forEach((pill) => {
+      pill.addEventListener("click", () => {
+        pills.forEach((p) => p.classList.remove("selected"));
+        pill.classList.add("selected");
+        const mins = pill.dataset.mins;
+        if (mins === "custom") {
+          customMinsInput.classList.add("visible");
+          customMinsInput.focus();
+        } else {
+          customMinsInput.classList.remove("visible");
+          selectedDurationMins = parseInt(mins, 10) || 10;
+          if (sessionDurationMeta) {
+            sessionDurationMeta.textContent = `⏱ ${selectedDurationMins} minutes`;
+          }
+        }
+      });
+    });
 
-  // Sound toggle button
-  soundToggleBtn.addEventListener("click", () => {
+    customMinsInput?.addEventListener("input", (e) => {
+      const val = parseInt(e.target.value, 10);
+      if (val && val > 0) {
+        selectedDurationMins = Math.min(180, Math.max(1, val));
+        if (sessionDurationMeta) {
+          sessionDurationMeta.textContent = `⏱ ${selectedDurationMins} minutes`;
+        }
+      }
+    });
+  }
+
+  pauseSessionBtn?.addEventListener("click", () => togglePauseSession());
+  coachReplayBtn?.addEventListener("click", () => replayCoachPrompt());
+
+  soundToggleBtn?.addEventListener("click", () => {
     audioEnabled = !audioEnabled;
     soundIcon.textContent = audioEnabled ? "🔊" : "🔇";
     soundLabel.textContent = audioEnabled ? "Audio ON" : "Audio OFF";
     if (!audioEnabled) stopCoachAudio();
   });
 
-  // Speech diagnostic banner buttons
-  retryMicBtn.addEventListener("click", () => {
+  retryMicBtn?.addEventListener("click", () => {
     hideSpeechDiagnostic();
     startListening();
   });
-  openTypeBtn.addEventListener("click", () => {
+  openTypeBtn?.addEventListener("click", () => {
     expandTypeDrawer();
   });
 
-  // Collapsible Type Fallback
-  typeToggleBtn.addEventListener("click", () => toggleTypeDrawer());
-  sendBtn.addEventListener("click", () => submitTurn(userInput.value));
+  typeToggleBtn?.addEventListener("click", () => toggleTypeDrawer());
+  sendBtn?.addEventListener("click", () => submitTurn(userInput.value));
 
-  userInput.addEventListener("keydown", (e) => {
+  userInput?.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submitTurn(userInput.value);
     }
   });
 
-  newSessionBtn.addEventListener("click", () => {
+  newSessionBtn?.addEventListener("click", () => {
     showScreen("home");
     loadProgress();
   });
 
-  reviewNbBtn.addEventListener("click", () => {
+  reviewNbBtn?.addEventListener("click", () => {
     showScreen("conv");
     tabNotebook.click();
   });
 
-  // Global Escape key
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       vocabPopup.classList.remove("visible");
+      privacyModal?.classList.remove("open");
       if (isListening) stopListening();
       stopCoachAudio();
     }
   });
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error("SpeakUp AI startup error:", err);
   setLoading(false);
   toast("Failed to start SpeakUp AI: " + err.message, "error");

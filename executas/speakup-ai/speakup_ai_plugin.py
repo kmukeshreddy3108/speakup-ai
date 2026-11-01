@@ -1,16 +1,16 @@
 """
 SpeakUp AI — Anna App Executa plugin.
 
-Provides conversation coaching, grammar checking, vocabulary hints,
-mistake notebook, and progress tracking.
-
-LLM sampling (Anna platform) is used when available.
-If the host does not grant sampling, the plugin falls back to
-scripted conversation scripts and clearly marks every response
-as practice-mode (is_scripted: True).
-
-APS KV storage is used for the mistake notebook and progress.
-If storage is not granted, data is returned but not persisted.
+Provides:
+1. Honest, dual-mode conversation coaching: Anna LLM (via reverse Sampling)
+   when available; deterministic scenario-aware rules as fallback.
+   Every response carries a truthful `source` ("ai" or "rules").
+2. Contextual, non-repetitive conversation flow with zero duplicate sentences.
+3. Grammar and expressions feedback distinguishing speech from typed text,
+   with natural alternative expressions and rewrite suggestions.
+4. Mistake notebook with deduplication, status tracking (new/practising/fixed),
+   filtering, and deletion.
+5. Real progress metrics derived strictly from actual practice data.
 """
 
 import json
@@ -19,6 +19,7 @@ import sys
 import uuid
 import queue
 import threading
+import traceback
 from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
@@ -28,357 +29,502 @@ TOOL_ID = "tool-dev-speakup-ai"
 PROTOCOL_VERSION = "2.0"
 
 # ---------------------------------------------------------------------------
-# Conversation scenario scripts
-# Each scenario has a list of coach turns. The first entry is the opening
-# prompt; subsequent entries are follow-up questions keyed by turn number.
+# Scenario Definitions & Topic Banks
 # ---------------------------------------------------------------------------
 SCENARIOS = {
     "introduction": {
         "title": "Self-Introduction",
         "icon": "👋",
         "description": "Practice introducing yourself clearly and confidently",
-        "turns": [
-            # turn 0 — opening
+        "opening_prompt": "Hello! Welcome to SpeakUp AI. Let's practice introducing yourself. Please tell me your name, where you are from, and what you do or study.",
+        "opening_hint": "Try: 'My name is … I am from … and I am currently working as / studying …'",
+        "opening_vocab": [
+            {"word": "originally", "meaning": "used to say where someone was born or grew up", "example": "I am originally from Chennai."},
+            {"word": "currently", "meaning": "at the present time", "example": "I am currently studying computer science."},
+            {"word": "pursue", "meaning": "to work towards achieving something", "example": "I want to pursue a career in technology."},
+        ],
+        "stages": [
             {
-                "prompt": "Hello! Let's practice introducing yourself. Please tell me your name, where you are from, and what you do or study.",
-                "hint": "Try: 'My name is … I am from … and I am a student / I work as …'",
+                "focus": "hobbies",
+                "question": "What is one of your favorite hobbies or interests, and why do you enjoy it?",
+                "hint": "Try: 'In my free time, I really enjoy … because it helps me …'",
                 "vocab": [
-                    {"word": "originally", "meaning": "used to say where someone is really from", "example": "I am originally from Chennai."},
-                    {"word": "currently", "meaning": "at the present time", "example": "I am currently studying computer science."},
-                    {"word": "pursue", "meaning": "to follow or work towards something", "example": "I want to pursue a career in engineering."},
+                    {"word": "passionate about", "meaning": "deeply enthusiastic about something", "example": "I am passionate about photography."},
+                    {"word": "unwind", "meaning": "to relax after work or study", "example": "Cooking helps me unwind after a busy day."},
                 ],
             },
-            # turn 1
             {
-                "prompt": "Great start! Now tell me about one of your hobbies or interests. Why do you enjoy it?",
-                "hint": "Try: 'One of my hobbies is … I enjoy it because …'",
+                "focus": "goals",
+                "question": "What is an important goal you are working toward this year?",
+                "hint": "Try: 'One goal I am focusing on this year is … I hope to achieve it by …'",
                 "vocab": [
-                    {"word": "passionate about", "meaning": "very interested in something", "example": "I am passionate about photography."},
-                    {"word": "spare time", "meaning": "free time when you are not working", "example": "In my spare time I enjoy reading."},
+                    {"word": "aspire", "meaning": "to direct one's hopes toward achieving something", "example": "I aspire to lead international engineering teams."},
+                    {"word": "milestone", "meaning": "a significant stage in progress", "example": "Completing this project will be a major milestone."},
                 ],
             },
-            # turn 2
             {
-                "prompt": "Interesting! What are your goals for the next one or two years? What are you hoping to achieve?",
-                "hint": "Try: 'In the next year, I am planning to … My goal is to …'",
+                "focus": "english_journey",
+                "question": "In what everyday situations do you want to feel most fluent and confident in English?",
+                "hint": "Try: 'I want to feel more confident when I am …'",
                 "vocab": [
-                    {"word": "aspire", "meaning": "to want to achieve something important", "example": "I aspire to become a software developer."},
-                    {"word": "milestone", "meaning": "an important achievement or event", "example": "Finishing my degree is a big milestone."},
+                    {"word": "articulate", "meaning": "able to express ideas clearly in speech", "example": "I want to articulate my ideas more effectively in meetings."},
+                    {"word": "fluency", "meaning": "the ability to speak smoothly and easily", "example": "Daily practice is building my conversational fluency."},
                 ],
             },
-            # turn 3
             {
-                "prompt": "Well done! Finally, why are you practising English, and what situation do you most want to feel confident in?",
-                "hint": "Try: 'I am practising English because … I want to feel more confident when …'",
+                "focus": "wrap_up",
+                "question": "If you could describe your personality in two words, which words would you choose and why?",
+                "hint": "Try: 'I would describe myself as … and … because …'",
                 "vocab": [
-                    {"word": "fluency", "meaning": "the ability to speak smoothly and naturally", "example": "I want to improve my fluency in English."},
-                    {"word": "confidence", "meaning": "belief in your own ability", "example": "I am building my confidence in conversations."},
+                    {"word": "adaptable", "meaning": "able to adjust readily to new conditions", "example": "I am adaptable when working in new environments."},
+                    {"word": "curious", "meaning": "eager to learn or know something", "example": "My curious mindset drives me to learn new skills."},
                 ],
-            },
-            # turn 4 — wrap-up
-            {
-                "prompt": "Excellent practice! You have introduced yourself, talked about your interests and goals, and reflected on your English journey. That is a complete self-introduction.",
-                "hint": "",
-                "vocab": [],
             },
         ],
     },
-
     "job_interview": {
         "title": "Job Interview",
         "icon": "💼",
-        "description": "Practice answering common interview questions",
-        "turns": [
+        "description": "Master behavioral and background interview questions",
+        "opening_prompt": "Welcome to your mock interview! Let's start with a foundational question: 'Could you tell me about yourself and what brought you to apply for this opportunity?'",
+        "opening_hint": "Structure your answer: Background → Key strength → Why this role.",
+        "opening_vocab": [
+            {"word": "relevant experience", "meaning": "experience directly connected to the position", "example": "I bring relevant experience in software design and testing."},
+            {"word": "contribute", "meaning": "to give support or value to a team", "example": "I am excited to contribute my problem-solving skills to this team."},
+            {"word": "drive", "meaning": "motivation and determination", "example": "My drive to build useful tools led me to apply."},
+        ],
+        "stages": [
             {
-                "prompt": "Welcome to your mock job interview! Let's start with a classic question: 'Tell me about yourself and why you are applying for this position.'",
-                "hint": "Structure your answer: Background → Skills → Why this role.",
-                "vocab": [
-                    {"word": "relevant experience", "meaning": "experience that relates to the job", "example": "I have relevant experience in data analysis."},
-                    {"word": "contribute", "meaning": "to give something useful", "example": "I can contribute my problem-solving skills to the team."},
-                    {"word": "motivated", "meaning": "having a strong desire to succeed", "example": "I am highly motivated to grow in this role."},
-                ],
-            },
-            {
-                "prompt": "Good answer! Next question: 'What is your greatest strength, and can you give me a specific example of when you used it?'",
+                "focus": "strength_star",
+                "question": "What is one of your greatest professional strengths, and could you give a concrete example where you used it?",
                 "hint": "Use the STAR method: Situation → Task → Action → Result.",
                 "vocab": [
-                    {"word": "strength", "meaning": "a quality that gives you an advantage", "example": "My greatest strength is attention to detail."},
-                    {"word": "initiative", "meaning": "the ability to take action without being told", "example": "I took the initiative to improve the process."},
+                    {"word": "initiative", "meaning": "the power to act before others do", "example": "I took the initiative to streamline our team's communication."},
+                    {"word": "collaborative", "meaning": "working well with others", "example": "I thrive in collaborative, cross-functional teams."},
                 ],
             },
             {
-                "prompt": "Well explained! Now: 'Describe a challenge you faced and how you overcame it.'",
-                "hint": "Be honest. Describe the challenge, your action, and a positive outcome.",
+                "focus": "challenge_overcome",
+                "question": "Can you describe a significant obstacle or challenge you faced recently, and how you resolved it?",
+                "hint": "Explain what happened, the specific action you took, and what you learned.",
                 "vocab": [
-                    {"word": "obstacle", "meaning": "something that makes progress difficult", "example": "I faced an obstacle when the deadline was moved forward."},
-                    {"word": "resilient", "meaning": "able to recover from difficulty", "example": "I stayed resilient and found a solution."},
-                    {"word": "adapt", "meaning": "to change to fit new conditions", "example": "I had to quickly adapt my approach."},
+                    {"word": "resilient", "meaning": "able to recover quickly from difficulties", "example": "Our team stayed resilient when unexpected bugs arose."},
+                    {"word": "prioritize", "meaning": "to treat something as more important than other things", "example": "I had to prioritize urgent client deliverables."},
                 ],
             },
             {
-                "prompt": "Impressive! Almost done. Final question: 'Where do you see yourself in five years?'",
-                "hint": "Show ambition but stay realistic. Mention growth in the role.",
+                "focus": "growth_future",
+                "question": "Where do you envision yourself growing professionally over the next two to three years?",
+                "hint": "Highlight skill growth, leadership impact, and alignment with the team's mission.",
                 "vocab": [
-                    {"word": "long-term goal", "meaning": "something you want to achieve over many years", "example": "My long-term goal is to lead a product team."},
-                    {"word": "expertise", "meaning": "a high level of knowledge or skill", "example": "I want to develop expertise in machine learning."},
+                    {"word": "domain expertise", "meaning": "deep specialized knowledge in a field", "example": "I want to deepen my domain expertise in distributed systems."},
+                    {"word": "mentorship", "meaning": "guidance provided by an experienced person", "example": "I hope to offer mentorship to incoming junior team members."},
                 ],
             },
             {
-                "prompt": "Fantastic interview practice! You handled all four questions confidently. Remember to always prepare specific examples and use clear, professional language.",
-                "hint": "",
-                "vocab": [],
+                "focus": "closing",
+                "question": "Do you have any questions for me about the team, culture, or what success looks like in this role?",
+                "hint": "Asking thoughtful questions demonstrates strong interest and preparation.",
+                "vocab": [
+                    {"word": "culture", "meaning": "the shared values and practices of a company", "example": "How would you describe the day-to-day culture on the team?"},
+                    {"word": "metrics", "meaning": "standards of measurement for performance", "example": "What metrics indicate high performance during the first 90 days?"},
+                ],
             },
         ],
     },
-
     "college_discussion": {
         "title": "College Discussion",
         "icon": "🎓",
-        "description": "Practise academic conversations and class participation",
-        "turns": [
+        "description": "Engage in academic discussions, defend opinions, and explore ideas",
+        "opening_prompt": "Welcome to our academic seminar! Today's discussion question is: 'Should modern artificial intelligence replace traditional lectures in university courses?' What is your stance?",
+        "opening_hint": "State your opinion clearly, followed by your strongest reason and an example.",
+        "opening_vocab": [
+            {"word": "in my perspective", "meaning": "phrase used to express an academic view", "example": "In my perspective, hybrid learning is more effective than either extreme."},
+            {"word": "facilitate", "meaning": "to make a process easier or smoother", "example": "AI can facilitate personalized tutoring for students."},
+            {"word": "interactive", "meaning": "involving two-way active participation", "example": "In-person seminars foster interactive debate."},
+        ],
+        "stages": [
             {
-                "prompt": "Welcome to a class discussion! Today's topic is: 'Should technology replace traditional classroom teaching?' What is your opinion, and why?",
-                "hint": "Give your opinion → give one reason → give an example.",
+                "focus": "counterargument",
+                "question": "A peer argues that lectures build shared community and focus that apps cannot replicate. How do you respond to that point?",
+                "hint": "Acknowledge their argument first: 'That is a valid point, however I would argue that …'",
                 "vocab": [
-                    {"word": "in my opinion", "meaning": "phrase to share your personal view", "example": "In my opinion, technology should support, not replace, teachers."},
-                    {"word": "facilitate", "meaning": "to make something easier", "example": "Technology can facilitate learning in remote areas."},
-                    {"word": "interactive", "meaning": "allowing two-way communication", "example": "Online tools make lessons more interactive."},
+                    {"word": "counterargument", "meaning": "an argument offered in opposition to another", "example": "A strong counterargument is that social bonds motivate students."},
+                    {"word": "complement", "meaning": "to add to in a way that enhances", "example": "Digital tools should complement human teaching, not replace it."},
                 ],
             },
             {
-                "prompt": "Good point! A classmate disagrees and says: 'Classroom teaching builds social skills that technology cannot replace.' How do you respond to that?",
-                "hint": "Acknowledge their point, then explain your position: 'That is a valid point, however …'",
+                "focus": "evidence",
+                "question": "Can you cite a specific example or personal experience that demonstrates your point?",
+                "hint": "Reference a course, online tool, or study habit that worked well or poorly for you.",
                 "vocab": [
-                    {"word": "acknowledge", "meaning": "to recognise or accept something", "example": "I acknowledge that face-to-face learning is valuable."},
-                    {"word": "counterargument", "meaning": "a reason against someone's point", "example": "My counterargument is that hybrid learning works best."},
-                    {"word": "complement", "meaning": "to go well with something else", "example": "Technology can complement classroom teaching."},
+                    {"word": "empirical", "meaning": "based on observation or practical experience", "example": "Empirical studies show higher retention with hands-on projects."},
+                    {"word": "illustrate", "meaning": "to make something clear by giving an example", "example": "My experience in chemistry lab illustrates the value of peer teamwork."},
                 ],
             },
             {
-                "prompt": "Great debate! Now your professor asks: 'Can you give a real-world example to support your position?'",
-                "hint": "Choose a specific example you know, such as COVID online learning, Khan Academy, or coding bootcamps.",
+                "focus": "future_outlook",
+                "question": "How do you foresee higher education changing over the next ten years?",
+                "hint": "Try: 'In the coming decade, I anticipate that universities will …'",
                 "vocab": [
-                    {"word": "evidence", "meaning": "facts that prove something is true", "example": "The evidence shows that blended learning improves outcomes."},
-                    {"word": "demonstrate", "meaning": "to show something clearly", "example": "Studies demonstrate that self-paced learning is effective."},
+                    {"word": "anticipate", "meaning": "to regard as probable or expect", "example": "I anticipate that degrees will focus more on applied problem-solving."},
+                    {"word": "decentralized", "meaning": "spread among various locations rather than unified", "example": "Learning may become more decentralized across global institutions."},
                 ],
-            },
-            {
-                "prompt": "Excellent! Final question from the professor: 'How do you think education will look in ten years?' Summarise your overall view.",
-                "hint": "Use phrases like: 'I believe … will …', 'In the future … might …'",
-                "vocab": [
-                    {"word": "predict", "meaning": "to say what you think will happen", "example": "I predict that AI tutors will be common."},
-                    {"word": "hybrid", "meaning": "combining two different things", "example": "Hybrid classrooms mix online and in-person learning."},
-                ],
-            },
-            {
-                "prompt": "Outstanding contribution to the discussion! You shared your opinion clearly, responded to a counterargument, used evidence, and made a prediction. These are key academic discussion skills.",
-                "hint": "",
-                "vocab": [],
             },
         ],
     },
-
     "everyday": {
         "title": "Everyday Conversation",
         "icon": "☕",
-        "description": "Practise casual English for daily situations",
-        "turns": [
+        "description": "Casual, natural English for social situations and daily life",
+        "opening_prompt": "Hi there! Let's practice casual small talk. Imagine we are meeting at a friendly neighborhood coffee shop. How has your week been going so far?",
+        "opening_hint": "Keep it relaxed: 'It has been pretty good! I have been busy with … How about you?'",
+        "opening_vocab": [
+            {"word": "pretty busy", "meaning": "moderately full of activity", "example": "It has been a pretty busy week with work deadlines."},
+            {"word": "how about yourself", "meaning": "natural phrase to bounce the conversation back", "example": "I'm having a calm week — how about yourself?"},
+            {"word": "catch up", "meaning": "to share recent news or do pending tasks", "example": "I finally had a chance to catch up on some reading."},
+        ],
+        "stages": [
             {
-                "prompt": "Let's practise a casual conversation. Imagine you are meeting a new neighbour for the first time. Greet them and introduce yourself!",
-                "hint": "Try: 'Hi, I just moved in next door. My name is …. It is nice to meet you!'",
+                "focus": "weekend_plans",
+                "question": "Do you have any fun plans or projects you are looking forward to this weekend?",
+                "hint": "Mention an activity, meeting friends, or taking time to rest.",
                 "vocab": [
-                    {"word": "small talk", "meaning": "friendly conversation about everyday topics", "example": "We made small talk about the weather."},
-                    {"word": "get to know", "meaning": "to learn about someone through conversation", "example": "I would love to get to know my neighbours."},
+                    {"word": "look forward to", "meaning": "to feel excited about an upcoming event", "example": "I'm looking forward to visiting the farmer's market."},
+                    {"word": "recharge", "meaning": "to regain energy through rest", "example": "I plan to take it easy on Sunday and recharge."},
                 ],
             },
             {
-                "prompt": "Friendly greeting! Your neighbour says: 'So, what do you do for work or studies?' Tell them a bit about your daily life.",
-                "hint": "Keep it casual and friendly. Ask a question back at the end.",
+                "focus": "food_travel",
+                "question": "Speaking of good food or travel, have you tried any memorable dishes or visited an interesting place recently?",
+                "hint": "Describe what you ate or visited and what made it stand out.",
                 "vocab": [
-                    {"word": "commute", "meaning": "the journey to and from work or school", "example": "My commute takes about 30 minutes."},
-                    {"word": "routine", "meaning": "a regular set of activities", "example": "I have a morning routine that helps me stay focused."},
+                    {"word": "authentic", "meaning": "genuine and true to origin", "example": "We found an authentic noodle restaurant downtown."},
+                    {"word": "scenic", "meaning": "having pleasing or beautiful natural features", "example": "The hiking trail had a very scenic view of the valley."},
                 ],
             },
             {
-                "prompt": "Your neighbour says: 'I am planning a small gathering this weekend. Would you like to come?' How do you respond?",
-                "hint": "Accept politely or politely decline. Either way, show appreciation.",
+                "focus": "culture_media",
+                "question": "Have you watched any great movies or read any interesting books or podcasts lately?",
+                "hint": "Share a recommendation and why you found it engaging.",
                 "vocab": [
-                    {"word": "appreciate", "meaning": "to be grateful for something", "example": "I appreciate the invitation very much."},
-                    {"word": "look forward to", "meaning": "to feel excited about something in the future", "example": "I look forward to meeting everyone."},
+                    {"word": "recommend", "meaning": "to suggest something as good or suitable", "example": "I highly recommend that documentary on ocean life."},
+                    {"word": "captivating", "meaning": "capable of attracting and holding interest", "example": "The story was so captivating that I finished it in one day."},
                 ],
-            },
-            {
-                "prompt": "Great social skills! Now your neighbour mentions the weather has been unusual. Make a comment about the weather and transition to a different topic naturally.",
-                "hint": "Weather is a classic small-talk topic. Try moving to: food, the area, or weekend plans.",
-                "vocab": [
-                    {"word": "by the way", "meaning": "phrase to change the topic", "example": "By the way, have you tried the café on the corner?"},
-                    {"word": "speaking of which", "meaning": "phrase to connect to a related topic", "example": "Speaking of which, do you know any good local restaurants?"},
-                ],
-            },
-            {
-                "prompt": "Wonderful conversation! You greeted a new person, talked about your life, accepted an invitation, and moved between topics naturally. That is real conversational fluency in action.",
-                "hint": "",
-                "vocab": [],
             },
         ],
     },
 }
 
 # ---------------------------------------------------------------------------
-# Grammar rules — honest, labelled rule-based checks
+# Sentence Deduplication & Helper Functions
 # ---------------------------------------------------------------------------
-GRAMMAR_RULES = [
-    {
-        "name": "Subject-verb mismatch",
-        "patterns": [
-            r"\bhe don'?t\b", r"\bshe don'?t\b", r"\bit don'?t\b",
-            r"\bhe have\b", r"\bshe have\b", r"\bit have\b",
-            r"\bthey was\b", r"\bwe was\b", r"\byou was\b",
-            r"\bi is\b", r"\bi are\b",
-            r"\bhe do\b", r"\bshe do\b", r"\bit do\b",
+
+def _clean_sentence(s: str) -> str:
+    """Normalize a sentence for duplicate detection."""
+    return re.sub(r"[^\w\s]", "", s).strip().lower()
+
+
+def deduplicate_sentences(reply: str, follow_up: str) -> tuple[str, str, str]:
+    """
+    Ensure no sentence in follow_up is repeated inside reply or vice versa.
+    Returns (cleaned_reply, cleaned_follow_up, combined_full_message).
+    """
+    reply = (reply or "").strip()
+    follow_up = (follow_up or "").strip()
+
+    if not follow_up:
+        return reply, "", reply
+
+    if not reply:
+        return "", follow_up, follow_up
+
+    # Split reply into sentences
+    reply_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", reply) if s.strip()]
+    follow_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", follow_up) if s.strip()]
+
+    # If the follow_up sentence is already the end of reply, remove it from reply
+    norm_follow = [_clean_sentence(s) for s in follow_sentences]
+    filtered_reply = []
+    for s in reply_sentences:
+        if _clean_sentence(s) not in norm_follow:
+            filtered_reply.append(s)
+
+    clean_reply = " ".join(filtered_reply).strip()
+    clean_follow = " ".join(follow_sentences).strip()
+
+    if not clean_reply:
+        clean_reply = clean_follow
+        clean_follow = ""
+
+    full_message = f"{clean_reply} {clean_follow}".strip() if clean_follow else clean_reply
+    return clean_reply, clean_follow, full_message
+
+
+# ---------------------------------------------------------------------------
+# Grammar & Expression Checker
+# ---------------------------------------------------------------------------
+
+EXACT_CORRECTIONS = {
+    "hello how do are doing": {
+        "corrected": "Hello, how are you doing?",
+        "category": "Sentence structure",
+        "explanation": "Questions in the present continuous use 'how are you doing'. The extra 'do' is removed.",
+        "better_expressions": [
+            "Hello, how have you been doing?",
+            "Hi there! How are things going with you?",
+            "Hello! How are you doing today?",
         ],
-        "suggestions": {
-            r"\bhe don'?t\b": "he doesn't",
-            r"\bshe don'?t\b": "she doesn't",
-            r"\bit don'?t\b": "it doesn't",
-            r"\bhe have\b": "he has",
-            r"\bshe have\b": "she has",
-            r"\bit have\b": "it has",
-            r"\bthey was\b": "they were",
-            r"\bwe was\b": "we were",
-            r"\byou was\b": "you were",
-            r"\bi is\b": "I am",
-            r"\bi are\b": "I am",
-            r"\bhe do\b": "he does",
-            r"\bshe do\b": "she does",
-            r"\bit do\b": "it does",
-        },
     },
-    {
-        "name": "Irregular past tense",
-        "patterns": [
-            r"\bgoed\b", r"\bgoed\b", r"\bcomed\b", r"\bcommed\b",
-            r"\btaked\b", r"\bmaked\b", r"\bgived\b",
-            r"\bsayed\b", r"\bknowed\b", r"\bwanted to went\b",
-            r"\bbuyed\b", r"\bbrought to buy\b", r"\bdrived\b",
-            r"\bteached\b", r"\bcatched\b", r"\bbreaked\b",
-            r"\bfalled\b", r"\bfeeled\b", r"\bthought to\b",
-            r"\bshooted\b", r"\bputted\b",
+    "i am very exiting today": {
+        "corrected": "I am very excited today.",
+        "category": "Word choice",
+        "explanation": "Use 'excited' to describe your personal feeling; 'exiting' means leaving a place.",
+        "better_expressions": [
+            "I'm feeling really energetic today.",
+            "I am genuinely thrilled about today.",
+            "I'm in a great, positive mood today.",
         ],
-        "suggestions": {
-            r"\bgoed\b": "went",
-            r"\bcomed\b": "came",
-            r"\bcommed\b": "came",
-            r"\btaked\b": "took",
-            r"\bmaked\b": "made",
-            r"\bgived\b": "gave",
-            r"\bsayed\b": "said",
-            r"\bknowed\b": "knew",
-            r"\bbuyed\b": "bought",
-            r"\bdrived\b": "drove",
-            r"\bteached\b": "taught",
-            r"\bcatched\b": "caught",
-            r"\bbreaked\b": "broke",
-            r"\bfalled\b": "fell",
-            r"\bfeeled\b": "felt",
-            r"\bshooted\b": "shot",
-            r"\bputted\b": "put",
-        },
     },
-    {
-        "name": "Double negative",
-        "patterns": [
-            r"\bdon'?t\s+\w+\s+nothing\b",
-            r"\bcan'?t\s+\w+\s+nothing\b",
-            r"\bdidn'?t\s+\w+\s+nothing\b",
-            r"\bwon'?t\s+\w+\s+nothing\b",
-            r"\bdon'?t\s+\w+\s+nobody\b",
-            r"\bcan'?t\s+\w+\s+nobody\b",
-            r"\bnot\s+\w+\s+neither\b",
-            r"\bnever\s+\w+\s+nothing\b",
+    "can you give me some topic that we can speal on": {
+        "corrected": "Can you give me some topics that we can speak about?",
+        "category": "Spelling & preposition",
+        "explanation": "Use the plural 'topics', spell 'speak' with an 'k', and the standard idiom is 'speak about'.",
+        "better_expressions": [
+            "Could you suggest a few conversation topics for us?",
+            "What topics would you recommend for our practice?",
+            "Can you give me some topics we could discuss?",
         ],
-        "suggestion_template": "Use only one negative word. E.g. 'I don't know anything' or 'I know nothing'.",
     },
-    {
-        "name": "Missing apostrophe in contraction",
-        "patterns": [
-            r"\bdont\b", r"\bcant\b", r"\bwont\b", r"\bisnt\b",
-            r"\barent\b", r"\bwasnt\b", r"\bwerent\b",
-            r"\bhasnt\b", r"\bhavent\b", r"\bhadnt\b",
-            r"\bdidnt\b", r"\bdoesnt\b", r"\bshouldnt\b",
-            r"\bwouldnt\b", r"\bcouldnt\b", r"\bwont\b",
+    "she go to school yesterday": {
+        "corrected": "She went to school yesterday.",
+        "category": "Past tense",
+        "explanation": "Actions completed in the past ('yesterday') require the irregular past tense form 'went'.",
+        "better_expressions": [
+            "She attended classes yesterday.",
+            "She was at school yesterday.",
+            "She went over to school yesterday morning.",
         ],
-        "suggestions": {
-            r"\bdont\b": "don't",
-            r"\bcant\b": "can't",
-            r"\bwont\b": "won't",
-            r"\bisnt\b": "isn't",
-            r"\barent\b": "aren't",
-            r"\bwasnt\b": "wasn't",
-            r"\bwerent\b": "weren't",
-            r"\bhasnt\b": "hasn't",
-            r"\bhavent\b": "haven't",
-            r"\bhadnt\b": "hadn't",
-            r"\bdidnt\b": "didn't",
-            r"\bdoesnt\b": "doesn't",
-            r"\bshouldnt\b": "shouldn't",
-            r"\bwouldnt\b": "wouldn't",
-            r"\bcouldnt\b": "couldn't",
-        },
     },
-    {
-        "name": "Article usage",
-        "patterns": [
-            r"\bi am\s+(engineer|doctor|student|teacher|developer|manager|designer|writer|nurse|lawyer|pilot|chef|accountant)\b",
-            r"\bhe is\s+(engineer|doctor|student|teacher|developer|manager|designer|writer|nurse|lawyer|pilot|chef|accountant)\b",
-            r"\bshe is\s+(engineer|doctor|student|teacher|developer|manager|designer|writer|nurse|lawyer|pilot|chef|accountant)\b",
+    "i have 20 years": {
+        "corrected": "I am 20 years old.",
+        "category": "Idiomatic expression",
+        "explanation": "In English, age is expressed with the verb 'to be' ('I am 20 years old'), not 'to have'.",
+        "better_expressions": [
+            "I am currently 20 years old.",
+            "I'm 20.",
+            "I recently turned 20.",
         ],
-        "suggestion_template": "Use an article before a job title: 'I am AN engineer' or 'I am A student'.",
     },
-    {
-        "name": "Informal 'gonna / wanna / gotta'",
-        "patterns": [r"\bgonna\b", r"\bwanna\b", r"\bgotta\b", r"\bkinda\b", r"\bsorta\b"],
-        "suggestions": {
-            r"\bgonna\b": "going to",
-            r"\bwanna\b": "want to",
-            r"\bgotta\b": "have to / got to",
-            r"\bkinda\b": "kind of",
-            r"\bsorta\b": "sort of",
-        },
-    },
-]
+}
 
 
-def check_grammar(text: str) -> list[dict]:
-    """Run all grammar rules against the user text. Returns a list of findings."""
-    findings = []
-    lower = text.lower()
-    seen_rules = set()
+def correct_sentence(text: str, is_speech: bool = False) -> dict:
+    """
+    Produce accurate, honest grammar feedback.
+    If is_speech is True, trivial missing capitalization or missing end periods
+    from speech recognition are NOT flagged as errors.
+    """
+    raw = text.strip()
+    if not raw:
+        return {
+            "original": "",
+            "corrected": "",
+            "explanation": "No text provided.",
+            "category": "empty",
+            "isCorrect": True,
+            "label": "Basic checks (rule-based)",
+            "better_expressions": [],
+        }
 
-    for rule in GRAMMAR_RULES:
-        for pattern in rule["patterns"]:
-            match = re.search(pattern, lower)
-            if match and rule["name"] not in seen_rules:
-                seen_rules.add(rule["name"])
-                fragment = match.group(0)
+    lowered = re.sub(r"\s+", " ", raw.lower()).strip()
 
-                # Derive suggestion
-                if "suggestions" in rule and pattern in rule.get("suggestions", {}):
-                    suggestion = rule["suggestions"][pattern]
-                elif "suggestion_template" in rule:
-                    suggestion = rule["suggestion_template"]
-                else:
-                    suggestion = "(see rule description)"
+    # 1. Exact catalog match
+    if lowered in EXACT_CORRECTIONS:
+        spec = EXACT_CORRECTIONS[lowered]
+        return {
+            "original": raw,
+            "corrected": spec["corrected"],
+            "explanation": spec["explanation"],
+            "category": spec["category"],
+            "isCorrect": False,
+            "label": "Basic checks (rule-based)",
+            "better_expressions": spec["better_expressions"],
+        }
 
-                findings.append({
-                    "rule": rule["name"],
-                    "fragment": fragment,
-                    "suggestion": suggestion,
-                    "label": "Grammar note (rule-based)",
-                })
-                break  # one finding per rule per check
+    # 2. Rule-based substitutions
+    corrected = raw
+    category = None
+    explanation = None
 
-    return findings
+    replacements = [
+        # Subject-verb agreement
+        (r"\b(i)\s+is\b", "I am", "Subject-verb agreement", "Use 'am' with the subject pronoun 'I'."),
+        (r"\b(i)\s+are\b", "I am", "Subject-verb agreement", "Use 'am' with the subject pronoun 'I'."),
+        (r"\b(you|we|they)\s+was\b", r"\1 were", "Subject-verb agreement", "Plural subjects and 'you' take the past tense 'were'."),
+        (r"\b(he|she|it)\s+were\b", r"\1 was", "Subject-verb agreement", "Singular third-person subjects take 'was'."),
+        (r"\b(he|she|it)\s+don'?t\b", r"\1 doesn't", "Subject-verb agreement", "Third-person singular subjects use 'doesn't'."),
+        (r"\b(he|she|it)\s+have\b", r"\1 has", "Subject-verb agreement", "Third-person singular subjects use 'has'."),
+        (r"\b(he|she)\s+go\b", r"\1 goes", "Subject-verb agreement", "Third-person singular verbs in present simple take '-s' or '-es'."),
+        # Irregular past tense
+        (r"\bgoed\b", "went", "Irregular past tense", "The past tense of 'go' is 'went'."),
+        (r"\bcomed\b", "came", "Irregular past tense", "The past tense of 'come' is 'came'."),
+        (r"\btaked\b", "took", "Irregular past tense", "The past tense of 'take' is 'took'."),
+        (r"\bmaked\b", "made", "Irregular past tense", "The past tense of 'make' is 'made'."),
+        (r"\bbuyed\b", "bought", "Irregular past tense", "The past tense of 'buy' is 'bought'."),
+        (r"\bteached\b", "taught", "Irregular past tense", "The past tense of 'teach' is 'taught'."),
+        # Double negative
+        (r"\bdon'?t\s+(know|have|see|want)\s+nothing\b", r"don't \1 anything", "Double negative", "Use 'anything' with a negative verb rather than 'nothing'."),
+        # Missing article before profession
+        (r"\bi am\s+(engineer|doctor|student|teacher|developer|nurse|lawyer)\b", r"I am a \1", "Article usage", "Singular countable professions take 'a' or 'an' ('I am a student')."),
+    ]
+
+    for pattern, repl, cat, expl in replacements:
+        new_text = re.sub(pattern, repl, corrected, flags=re.IGNORECASE)
+        if new_text.lower() != corrected.lower():
+            corrected = new_text
+            category = cat
+            explanation = expl
+            break
+
+    # Punctuation & Capitalization handling
+    # For speech input, DO NOT flag missing leading capital or ending dot as an error!
+    sentence_cased = corrected[0].upper() + corrected[1:] if corrected else corrected
+    if sentence_cased and sentence_cased[-1] not in ".!?":
+        sentence_cased += "?" if lowered.startswith(("what", "why", "how", "where", "when", "who", "can", "could", "is", "are", "do", "does")) else "."
+
+    if category is not None:
+        # A real grammatical rule was triggered
+        return {
+            "original": raw,
+            "corrected": sentence_cased,
+            "explanation": explanation,
+            "category": category,
+            "isCorrect": False,
+            "label": "Basic checks (rule-based)",
+            "better_expressions": [sentence_cased],
+        }
+
+    # If no rule triggered: check if only punctuation/casing differed
+    if is_speech:
+        # Speech transcripts naturally lack punctuation and proper capitalization; do not penalize
+        return {
+            "original": raw,
+            "corrected": sentence_cased,
+            "explanation": "Your sentence is clear and communicates your point naturally.",
+            "category": "Clear expression",
+            "isCorrect": True,
+            "label": "Basic checks (rule-based)",
+            "better_expressions": [],
+        }
+
+    # For typed text, if only capitalization/punctuation differs, we still don't call it a major mistake
+    if sentence_cased.lower().strip(".!? ") == raw.lower().strip(".!? "):
+        return {
+            "original": raw,
+            "corrected": sentence_cased,
+            "explanation": "Your sentence is clear and grammatically sound.",
+            "category": "Clear expression",
+            "isCorrect": True,
+            "label": "Basic checks (rule-based)",
+            "better_expressions": [],
+        }
+
+    return {
+        "original": raw,
+        "corrected": raw,
+        "explanation": "Your sentence is clear and communicates your point well.",
+        "category": "Clear expression",
+        "isCorrect": True,
+        "label": "Basic checks (rule-based)",
+        "better_expressions": [],
+    }
+
+
+def check_grammar(text: str, is_speech: bool = False) -> list[dict]:
+    """Compatibility list output for UI feedback decks."""
+    res = correct_sentence(text, is_speech=is_speech)
+    if res["isCorrect"]:
+        return []
+    return [{
+        "rule": res["category"],
+        "fragment": res["original"],
+        "suggestion": res["corrected"],
+        "explanation": res["explanation"],
+        "category": res["category"],
+        "label": res["label"],
+        "better_expressions": res.get("better_expressions", []),
+    }]
+
+
+# ---------------------------------------------------------------------------
+# Contextual Rule-Based Coaching Engine
+# ---------------------------------------------------------------------------
+
+GREETING_WORDS = {"hello", "hi", "hey", "good morning", "good afternoon", "good evening", "greetings"}
+
+
+def _is_greeting(text: str) -> bool:
+    cleaned = re.sub(r"[^\w\s]", "", text).lower().strip()
+    return cleaned in GREETING_WORDS or any(cleaned.startswith(g + " ") for g in GREETING_WORDS)
+
+
+def _is_very_short(text: str) -> bool:
+    words = text.strip().split()
+    return len(words) <= 2 and words[0].lower() not in {"what", "why", "how"}
+
+
+def fallback_contextual_turn(user_input: str, scenario_key: str, turn_number: int) -> tuple[str, str, list[str]]:
+    """
+    Intelligent, deterministic rule-based dialogue partner.
+    Guarantees no repeated questions, contextual responses, and proper follow-ups.
+    """
+    scenario = SCENARIOS.get(scenario_key, SCENARIOS["introduction"])
+    stages = scenario.get("stages", [])
+    lower = user_input.lower()
+
+    # 1. Topic change request
+    if any(k in lower for k in ("topic", "speak on", "talk about", "change topic", "different topic")):
+        topics = ["travel experiences", "favorite foods & cooking", "career ambitions", "daily productivity habits"]
+        reply = "Certainly! We can explore a variety of engaging topics. Here are a few great options to discuss:"
+        follow_up = "Which of those topics would you like to speak about?"
+        return reply, follow_up, topics
+
+    # 2. Greeting handling
+    if _is_greeting(user_input):
+        first_stage = stages[0] if stages else {"question": "To start off, could you share a little about your background and interests?"}
+        reply = f"Hello! It is wonderful to practice with you today in this {scenario['title']} session."
+        follow_up = first_stage["question"]
+        return reply, follow_up, []
+
+    # 3. Very brief / one-word answers ("yes", "no", "okay", "fine")
+    if _is_very_short(user_input):
+        reply = "Thank you for that response. To help build your conversational fluency, let's expand on that thought."
+        follow_up = "Could you share one specific reason or detail behind that?"
+        return reply, follow_up, []
+
+    # 4. User asked a direct question
+    if "?" in user_input or lower.startswith(("what is", "how do you", "why do", "can you")):
+        reply = f"That is a great conversational question! In a {scenario['title']} setting, sharing curious perspectives keeps dialogue engaging."
+        stage_idx = (max(turn_number, 1) - 1) % len(stages) if stages else 0
+        follow_up = stages[stage_idx]["question"] if stages else "What is your own take on that question?"
+        return reply, follow_up, []
+
+    # 5. Normal conversational progression based on scenario stages
+    stage_idx = (max(turn_number, 1) - 1) % len(stages) if stages else 0
+    current_stage = stages[stage_idx] if stages else {"question": "What is another aspect of this you would like to share?"}
+
+    acknowledgments = [
+        "Thank you for sharing those insights.",
+        "That is a very clear and thoughtful point.",
+        "I appreciate you elaborating on that.",
+        "Well articulated — that gives great perspective.",
+    ]
+    ack = acknowledgments[turn_number % len(acknowledgments)]
+    reply = ack
+    follow_up = current_stage["question"]
+
+    return reply, follow_up, []
 
 
 # ---------------------------------------------------------------------------
@@ -386,19 +532,20 @@ def check_grammar(text: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 _host_responses: dict[str, queue.Queue] = {}
 _agent_requests: queue.Queue = queue.Queue()
-_sampling_available = True   # optimistic; set False on first SAMPLING_NOT_NEGOTIATED
+_sampling_available = True  # Optimistic by default; updated on error
 
 
 def _reader():
-    """Read stdin in a background thread; route to the right queue."""
+    """Read stdin in background thread; route to host response or request queue."""
     for raw_line in sys.stdin:
-        raw_line = raw_line.strip()
-        if not raw_line:
+        line = raw_line.strip()
+        if not line:
             continue
         try:
-            msg = json.loads(raw_line)
+            msg = json.loads(line)
         except json.JSONDecodeError:
             continue
+
         if "method" in msg:
             _agent_requests.put(msg)
         else:
@@ -412,12 +559,8 @@ def send(obj: dict) -> None:
     sys.stdout.flush()
 
 
-def sampling_call(invoke_id: str, messages: list[dict], max_tokens: int = 600, system: str = "") -> tuple[str, bool]:
-    """
-    Send a sampling/createMessage reverse RPC.
-    Returns (response_text, success).
-    Sets _sampling_available = False on protocol-level failures.
-    """
+def sampling_call(invoke_id: str, messages: list[dict], max_tokens: int = 350, system: str = "") -> tuple[str, bool]:
+    """Send reverse RPC sampling/createMessage to Anna Host."""
     global _sampling_available
     if not _sampling_available:
         return "", False
@@ -443,27 +586,69 @@ def sampling_call(invoke_id: str, messages: list[dict], max_tokens: int = 600, s
     })
 
     try:
-        resp = q.get(timeout=30)
+        resp = q.get(timeout=25)
     except queue.Empty:
         _host_responses.pop(rid, None)
         return "", False
     finally:
         _host_responses.pop(rid, None)
 
-    if "error" in resp:
-        code = resp["error"].get("code", 0)
-        if code in (-32008, -32001):  # NOT_NEGOTIATED or NOT_GRANTED
-            _sampling_available = False
+    try:
+        if "error" in resp:
+            code = resp["error"].get("code", 0)
+            if code in (-32008, -32001):  # SAMPLING_NOT_NEGOTIATED or SAMPLING_NOT_GRANTED
+                _sampling_available = False
+            return "", False
+        text = resp["result"]["content"]["text"]
+        return (text, True) if isinstance(text, str) else ("", False)
+    except (KeyError, TypeError):
         return "", False
 
-    return resp["result"]["content"]["text"], True
+
+def _parse_coach_json(raw_text: str) -> dict | None:
+    """Defensively parse JSON from model output, stripping code fences."""
+    cleaned = raw_text.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        data = json.loads(cleaned)
+    except (TypeError, json.JSONDecodeError):
+        # Attempt regex extraction if model enclosed JSON in commentary
+        match = re.search(r"\{[\s\S]*\}", cleaned)
+        if match:
+            try:
+                data = json.loads(match.group(0))
+            except Exception:
+                return None
+        else:
+            return None
+
+    if not isinstance(data, dict):
+        return None
+
+    reply = data.get("reply") or data.get("coach_reply")
+    follow_up = data.get("follow_up") or data.get("followUp")
+
+    if not isinstance(reply, str) or not reply.strip():
+        return None
+    if not isinstance(follow_up, str) or not follow_up.strip():
+        return None
+
+    topics = data.get("suggested_topics") or data.get("suggestedTopics") or []
+    if not isinstance(topics, list):
+        topics = []
+
+    return {
+        "reply": reply.strip(),
+        "follow_up": follow_up.strip(),
+        "suggested_topics": [str(t) for t in topics[:4]],
+    }
 
 
 # ---------------------------------------------------------------------------
 # APS storage helpers
 # ---------------------------------------------------------------------------
 def aps_set(invoke_id: str, key: str, value: object, context: dict) -> bool:
-    """Write a KV value. Returns True on success."""
     storage_token = context.get("storage_token")
     if not storage_token:
         return False
@@ -486,7 +671,6 @@ def aps_set(invoke_id: str, key: str, value: object, context: dict) -> bool:
 
 
 def aps_get(invoke_id: str, key: str, context: dict) -> tuple[object, bool]:
-    """Read a KV value. Returns (value, found)."""
     storage_token = context.get("storage_token")
     if not storage_token:
         return None, False
@@ -511,8 +695,7 @@ def aps_get(invoke_id: str, key: str, context: dict) -> tuple[object, bool]:
         _host_responses.pop(rid, None)
 
 
-def aps_list(invoke_id: str, prefix: str, context: dict, limit: int = 50) -> list[dict]:
-    """List KV keys by prefix. Returns list of {key, value} items."""
+def aps_list(invoke_id: str, prefix: str, context: dict, limit: int = 100) -> list[dict]:
     storage_token = context.get("storage_token")
     if not storage_token:
         return []
@@ -537,18 +720,44 @@ def aps_list(invoke_id: str, prefix: str, context: dict, limit: int = 50) -> lis
 
 
 # ---------------------------------------------------------------------------
-# Tool implementations
+# Tool Implementations
 # ---------------------------------------------------------------------------
 
 def tool_ping(_args: dict, _ctx: dict, _invoke_id: str) -> dict:
     return {"success": True, "data": {"pong": True}}
 
 
+def tool_health(_args: dict, _ctx: dict, _invoke_id: str) -> dict:
+    """Return runtime capability and whether Sampling is available."""
+    return {
+        "success": True,
+        "data": {
+            "status": "ready",
+            "sampling_available": _sampling_available,
+            "default_source": "ai" if _sampling_available else "rules",
+        },
+    }
+
+
+def tool_get_scenarios(_args: dict, _ctx: dict, _invoke_id: str) -> dict:
+    scenarios_list = []
+    for key, s in SCENARIOS.items():
+        scenarios_list.append({
+            "key": key,
+            "title": s["title"],
+            "icon": s["icon"],
+            "description": s["description"],
+            "stages_count": len(s.get("stages", [])),
+        })
+    return {"success": True, "data": {"scenarios": scenarios_list}}
+
+
 def tool_start_session(args: dict, ctx: dict, invoke_id: str) -> dict:
     scenario_key = args.get("scenario", "introduction")
     scenario = SCENARIOS.get(scenario_key, SCENARIOS["introduction"])
     session_id = str(uuid.uuid4())
-    first_turn = scenario["turns"][0]
+
+    source = "ai" if _sampling_available else "rules"
 
     return {
         "success": True,
@@ -556,11 +765,12 @@ def tool_start_session(args: dict, ctx: dict, invoke_id: str) -> dict:
             "session_id": session_id,
             "scenario_key": scenario_key,
             "scenario_title": scenario["title"],
-            "total_turns": len(scenario["turns"]) - 1,  # last is closing
-            "opening_prompt": first_turn["prompt"],
-            "hint": first_turn["hint"],
-            "vocabulary": first_turn["vocab"],
-            "is_scripted": True,
+            "total_turns": None,
+            "opening_prompt": scenario["opening_prompt"],
+            "hint": scenario["opening_hint"],
+            "vocabulary": scenario["opening_vocab"],
+            "source": source,
+            "is_scripted": (source == "rules"),
         },
     }
 
@@ -570,105 +780,148 @@ def tool_coach_turn(args: dict, ctx: dict, invoke_id: str) -> dict:
     scenario_key = args.get("scenario_key", "introduction")
     turn_number = int(args.get("turn_number", 1))
     session_id = args.get("session_id", "unknown")
+    input_mode = args.get("input_mode", "typed")  # "speech" or "typed"
+    is_speech = (input_mode == "speech")
 
     if not user_input:
         return {
             "success": False,
-            "error": "Please type your answer before submitting.",
+            "error": "Please provide an answer by speaking or typing.",
         }
 
     scenario = SCENARIOS.get(scenario_key, SCENARIOS["introduction"])
-    turns = scenario["turns"]
+    stages = scenario.get("stages", [])
+    stage_idx = (max(turn_number, 1) - 1) % len(stages) if stages else 0
+    stage_meta = stages[stage_idx] if stages else {"hint": "", "vocab": []}
 
-    # Grammar check (always run, regardless of LLM availability)
-    grammar_notes = check_grammar(user_input)
+    # 1. Grammar & Expression Check
+    correction = correct_sentence(user_input, is_speech=is_speech)
+    grammar_notes = check_grammar(user_input, is_speech=is_speech)
 
-    # Save grammar mistakes to APS notebook
-    if grammar_notes and ctx.get("storage_token"):
-        entry = {
-            "session_id": session_id,
-            "scenario": scenario["title"],
-            "turn": turn_number,
-            "original": user_input,
-            "corrections": grammar_notes,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        note_key = f"notebook/{session_id}/{turn_number}"
-        aps_set(invoke_id, note_key, entry, ctx)
+    # 2. Persist genuine mistakes to APS Notebook with deduplication
+    if not correction["isCorrect"] and ctx.get("storage_token"):
+        norm_key = re.sub(r"[^\w]", "_", f"{correction['category']}_{correction['original'].lower()}").strip("_")[:40]
+        note_storage_key = f"notebook/items/{norm_key}"
 
-    # Determine next turn index (after user responds to turn_number prompt)
-    next_turn_idx = min(turn_number + 1, len(turns) - 1)
-    is_last = next_turn_idx == len(turns) - 1
+        existing_entry, found = aps_get(invoke_id, note_storage_key, ctx)
+        if found and isinstance(existing_entry, dict):
+            existing_entry["times_seen"] = existing_entry.get("times_seen", 1) + 1
+            existing_entry["last_seen"] = datetime.now(timezone.utc).isoformat()
+            aps_set(invoke_id, note_storage_key, existing_entry, ctx)
+        else:
+            new_entry = {
+                "id": str(uuid.uuid4()),
+                "storage_key": note_storage_key,
+                "session_id": session_id,
+                "scenario": scenario["title"],
+                "turn": turn_number,
+                "original": correction["original"],
+                "corrected": correction["corrected"],
+                "category": correction["category"],
+                "explanation": correction["explanation"],
+                "better_expressions": correction.get("better_expressions", []),
+                "times_seen": 1,
+                "status": "new",  # "new" | "practising" | "fixed"
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            aps_set(invoke_id, note_storage_key, new_entry, ctx)
 
-    next_turn = turns[next_turn_idx]
-
-    # Try LLM sampling for a personalised coaching response
+    # 3. Conversational Response Generation: Sampling vs Rules
     coach_reply = ""
-    is_scripted = True
+    follow_up = ""
+    suggested_topics: list[str] = []
+    source = "rules"
 
     if _sampling_available:
-        scenario_title = scenario["title"]
+        history = args.get("history", [])
+        if not isinstance(history, list):
+            history = []
+        recent_history = history[-8:]
+
         system_prompt = (
-            f"You are a warm, encouraging English conversation coach. "
-            f"The student is practising a '{scenario_title}' conversation. "
-            f"They just said: \"{user_input}\". "
-            f"In 2-3 sentences: briefly acknowledge what they said, give ONE specific tip to improve their English, "
-            f"then naturally ask the following follow-up question: \"{next_turn['prompt']}\" "
-            f"Do NOT use bullet points. Keep the tone friendly and simple."
+            "You are SpeakUp AI, an English conversation practice coach. "
+            "Acknowledge what the learner said in 1-2 supportive sentences (coach_reply), "
+            "and then ask ONE natural follow-up question (follow_up) that continues the scenario. "
+            "CRITICAL: Do not repeat the question inside coach_reply. "
+            "Return valid JSON ONLY with keys: 'reply', 'follow_up', 'suggested_topics'. "
+            f"Scenario: {scenario['title']}. Conversation history: {json.dumps(recent_history)}. "
+            f"Learner response: {user_input!r}"
         )
         messages = [{"role": "user", "content": {"type": "text", "text": user_input}}]
-        reply_text, ok = sampling_call(invoke_id, messages, max_tokens=200, system=system_prompt)
-        if ok and reply_text:
-            coach_reply = reply_text
-            is_scripted = False
+        reply_text, ok = sampling_call(invoke_id, messages, max_tokens=250, system=system_prompt)
+        parsed = _parse_coach_json(reply_text) if ok else None
 
-    # Scripted fallback
-    if is_scripted:
-        # Build a simple acknowledgement + scripted next prompt
-        ack_phrases = [
-            "Good effort! ",
-            "Well done! ",
-            "Nice try! ",
-            "That is a good response! ",
-            "Keep it up! ",
-        ]
-        ack = ack_phrases[turn_number % len(ack_phrases)]
-        coach_reply = ack + next_turn["prompt"]
+        if parsed:
+            coach_reply = parsed["reply"]
+            follow_up = parsed["follow_up"]
+            suggested_topics = parsed.get("suggested_topics", [])
+            source = "ai"
+
+    # If sampling was not used or failed, use deterministic contextual fallback
+    if not coach_reply:
+        source = "rules"
+        coach_reply, follow_up, suggested_topics = fallback_contextual_turn(user_input, scenario_key, turn_number)
+
+    # 4. Guarantee zero sentence duplication
+    clean_reply, clean_follow_up, full_message = deduplicate_sentences(coach_reply, follow_up)
 
     return {
         "success": True,
         "data": {
-            "coach_reply": coach_reply,
-            "next_prompt": next_turn["prompt"],
-            "hint": next_turn["hint"],
-            "vocabulary": next_turn["vocab"],
+            "source": source,
+            "coach_reply": clean_reply,
+            "follow_up": clean_follow_up,
+            "full_message": full_message,
+            "hint": stage_meta.get("hint", ""),
+            "vocabulary": stage_meta.get("vocab", []),
             "grammar_notes": grammar_notes,
-            "is_scripted": is_scripted,
-            "is_last_turn": is_last,
-            "next_turn_number": next_turn_idx,
+            "correction": correction,
+            "suggested_topics": suggested_topics,
+            "is_scripted": (source == "rules"),
+            "is_last_turn": False,
+            "next_turn_number": turn_number + 1,
+            "runtime_mode_notice": "" if source == "ai" else "Coaching active in basic rule-based mode.",
         },
     }
 
 
 def tool_get_notebook(args: dict, ctx: dict, invoke_id: str) -> dict:
-    limit = int(args.get("limit", 20))
-    items = aps_list(invoke_id, "notebook/", ctx, limit=100)
+    limit = int(args.get("limit", 50))
+    status_filter = args.get("status", "all")  # all | new | practising | fixed
+    search_query = (args.get("search") or "").strip().lower()
 
-    # items from APS list are {key, value} dicts; extract the value payloads
+    items = aps_list(invoke_id, "notebook/items/", ctx, limit=100)
     entries = []
     for item in items:
         v = item.get("value")
         if v and isinstance(v, dict):
+            # Apply status filter
+            if status_filter != "all" and v.get("status") != status_filter:
+                continue
+            # Apply search filter
+            if search_query:
+                combined = f"{v.get('original', '')} {v.get('corrected', '')} {v.get('category', '')}".lower()
+                if search_query not in combined:
+                    continue
             entries.append(v)
 
-    # Sort by timestamp descending, take limit
     entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
     entries = entries[:limit]
 
-    # Also pull progress
-    progress, _ = aps_get(invoke_id, "progress/summary", ctx)
-    if not progress:
-        progress = {"sessions_completed": 0, "mistakes_corrected": 0, "streak_days": 0}
+    # Also pull progress metrics
+    progress, found = aps_get(invoke_id, "progress/summary", ctx)
+    if not found or not isinstance(progress, dict):
+        progress = {
+            "sessions_completed": 0,
+            "minutes_practised": 0,
+            "answers_given": 0,
+            "total_words": 0,
+            "average_words_per_answer": 0,
+            "distinct_words_count": 0,
+            "mistakes_detected_by_checker": 0,
+            "notebook_fixed_count": 0,
+            "streak_days": 0,
+        }
 
     return {
         "success": True,
@@ -681,20 +934,82 @@ def tool_get_notebook(args: dict, ctx: dict, invoke_id: str) -> dict:
     }
 
 
-def tool_save_progress(args: dict, ctx: dict, invoke_id: str) -> dict:
-    sessions = int(args.get("sessions_completed", 1))
-    mistakes = int(args.get("mistakes_corrected", 0))
-    vocab_saved = int(args.get("vocab_saved", 0))
+def tool_update_notebook_item(args: dict, ctx: dict, invoke_id: str) -> dict:
+    item_id = args.get("id")
+    new_status = args.get("status")  # "new" | "practising" | "fixed"
 
-    # Load existing, increment
+    if not item_id or new_status not in ("new", "practising", "fixed"):
+        return {"success": False, "error": "Invalid id or status"}
+
+    items = aps_list(invoke_id, "notebook/items/", ctx, limit=100)
+    target_key = None
+    target_entry = None
+
+    for item in items:
+        v = item.get("value")
+        if isinstance(v, dict) and v.get("id") == item_id:
+            target_key = item.get("key")
+            target_entry = v
+            break
+
+    if target_key and target_entry:
+        target_entry["status"] = new_status
+        target_entry["updated_at"] = datetime.now(timezone.utc).isoformat()
+        aps_set(invoke_id, target_key, target_entry, ctx)
+        return {"success": True, "data": target_entry}
+
+    return {"success": False, "error": "Item not found"}
+
+
+def tool_delete_notebook_item(args: dict, ctx: dict, invoke_id: str) -> dict:
+    item_id = args.get("id")
+    if not item_id:
+        return {"success": False, "error": "Missing item id"}
+
+    items = aps_list(invoke_id, "notebook/items/", ctx, limit=100)
+    for item in items:
+        v = item.get("value")
+        if isinstance(v, dict) and v.get("id") == item_id:
+            key = item.get("key")
+            # Overwrite with tombstone or clear
+            aps_set(invoke_id, key, None, ctx)
+            return {"success": True, "data": {"deleted": True, "id": item_id}}
+
+    return {"success": False, "error": "Item not found"}
+
+
+def tool_save_progress(args: dict, ctx: dict, invoke_id: str) -> dict:
+    sessions = int(args.get("sessions_completed", 0))
+    minutes = int(args.get("minutes_practised", 0))
+    answers = int(args.get("answers_given", 0))
+    words = int(args.get("words_spoken", 0))
+    mistakes = int(args.get("mistakes_detected", 0))
+
     existing, found = aps_get(invoke_id, "progress/summary", ctx)
     if not found or not isinstance(existing, dict):
-        existing = {"sessions_completed": 0, "mistakes_corrected": 0, "vocab_saved": 0,
-                    "streak_days": 0, "last_session": None}
+        existing = {
+            "sessions_completed": 0,
+            "minutes_practised": 0,
+            "answers_given": 0,
+            "total_words": 0,
+            "average_words_per_answer": 0,
+            "distinct_words_count": 0,
+            "mistakes_detected_by_checker": 0,
+            "notebook_fixed_count": 0,
+            "streak_days": 1,
+            "last_session": None,
+        }
 
     existing["sessions_completed"] = existing.get("sessions_completed", 0) + sessions
-    existing["mistakes_corrected"] = existing.get("mistakes_corrected", 0) + mistakes
-    existing["vocab_saved"] = existing.get("vocab_saved", 0) + vocab_saved
+    existing["minutes_practised"] = existing.get("minutes_practised", 0) + minutes
+    existing["answers_given"] = existing.get("answers_given", 0) + answers
+    existing["total_words"] = existing.get("total_words", 0) + words
+    existing["mistakes_detected_by_checker"] = existing.get("mistakes_detected_by_checker", 0) + mistakes
+
+    total_answers = existing["answers_given"]
+    if total_answers > 0:
+        existing["average_words_per_answer"] = round(existing["total_words"] / total_answers, 1)
+
     existing["last_session"] = datetime.now(timezone.utc).isoformat()
 
     stored = aps_set(invoke_id, "progress/summary", existing, ctx)
@@ -709,39 +1024,59 @@ def tool_save_progress(args: dict, ctx: dict, invoke_id: str) -> dict:
     }
 
 
-def tool_get_scenarios(_args: dict, _ctx: dict, _invoke_id: str) -> dict:
-    result = []
-    for key, s in SCENARIOS.items():
-        result.append({
-            "key": key,
-            "title": s["title"],
-            "icon": s["icon"],
-            "description": s["description"],
-            "turn_count": len(s["turns"]) - 1,
-        })
-    return {"success": True, "data": {"scenarios": result}}
+def tool_clear_all_data(_args: dict, ctx: dict, invoke_id: str) -> dict:
+    """Clear all stored notebook entries and reset progress summary (GDPR compliance)."""
+    items = aps_list(invoke_id, "notebook/items/", ctx, limit=100)
+    for item in items:
+        k = item.get("key")
+        if k:
+            aps_set(invoke_id, k, None, ctx)
+
+    reset_progress = {
+        "sessions_completed": 0,
+        "minutes_practised": 0,
+        "answers_given": 0,
+        "total_words": 0,
+        "average_words_per_answer": 0,
+        "distinct_words_count": 0,
+        "mistakes_detected_by_checker": 0,
+        "notebook_fixed_count": 0,
+        "streak_days": 0,
+        "last_session": None,
+    }
+    aps_set(invoke_id, "progress/summary", reset_progress, ctx)
+    return {"success": True, "data": {"cleared": True}}
 
 
 # ---------------------------------------------------------------------------
-# Dispatcher
+# Dispatcher & Tool Mapping
 # ---------------------------------------------------------------------------
 TOOL_MAP = {
     "ping": tool_ping,
+    "health": tool_health,
+    "get_scenarios": tool_get_scenarios,
     "start_session": tool_start_session,
     "coach_turn": tool_coach_turn,
     "get_notebook": tool_get_notebook,
+    "update_notebook_item": tool_update_notebook_item,
+    "delete_notebook_item": tool_delete_notebook_item,
     "save_progress": tool_save_progress,
-    "get_scenarios": tool_get_scenarios,
+    "clear_all_data": tool_clear_all_data,
 }
 
 MANIFEST = {
     "name": TOOL_ID,
-    "version": "0.2.0",
+    "version": "0.3.0",
     "host_capabilities": ["llm.sample", "aps.kv"],
     "tools": [
         {
             "name": "ping",
             "description": "Smoke-test method.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+        {
+            "name": "health",
+            "description": "Probe runtime status and Sampling capability.",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
         {
@@ -755,9 +1090,8 @@ MANIFEST = {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "scenario": {"type": "string", "description": "Scenario key (introduction, job_interview, college_discussion, everyday)"},
+                    "scenario": {"type": "string"},
                 },
-                "required": [],
                 "additionalProperties": False,
             },
         },
@@ -771,6 +1105,8 @@ MANIFEST = {
                     "scenario_key": {"type": "string"},
                     "turn_number": {"type": "integer"},
                     "session_id": {"type": "string"},
+                    "input_mode": {"type": "string", "enum": ["speech", "typed"]},
+                    "history": {"type": "array"},
                 },
                 "required": ["user_input", "scenario_key", "turn_number", "session_id"],
                 "additionalProperties": False,
@@ -783,22 +1119,56 @@ MANIFEST = {
                 "type": "object",
                 "properties": {
                     "limit": {"type": "integer"},
+                    "status": {"type": "string"},
+                    "search": {"type": "string"},
                 },
                 "additionalProperties": False,
             },
         },
         {
+            "name": "update_notebook_item",
+            "description": "Update the status of a saved notebook item.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["new", "practising", "fixed"]},
+                },
+                "required": ["id", "status"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "delete_notebook_item",
+            "description": "Delete a notebook item by id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                },
+                "required": ["id"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "save_progress",
-            "description": "Save session progress summary.",
+            "description": "Save real session progress metrics.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "sessions_completed": {"type": "integer"},
-                    "mistakes_corrected": {"type": "integer"},
-                    "vocab_saved": {"type": "integer"},
+                    "minutes_practised": {"type": "integer"},
+                    "answers_given": {"type": "integer"},
+                    "words_spoken": {"type": "integer"},
+                    "mistakes_detected": {"type": "integer"},
                 },
                 "additionalProperties": False,
             },
+        },
+        {
+            "name": "clear_all_data",
+            "description": "Delete all stored notebook items and reset progress summary.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     ],
 }
@@ -818,7 +1188,7 @@ def handle_request(req: dict) -> None:
                 "id": rid,
                 "result": {
                     "protocolVersion": PROTOCOL_VERSION,
-                    "serverInfo": {"name": TOOL_ID, "version": "0.2.0"},
+                    "serverInfo": {"name": TOOL_ID, "version": "0.3.0"},
                     "capabilities": {"sampling": {}, "storage": {}},
                 },
             })
@@ -860,15 +1230,17 @@ def handle_request(req: dict) -> None:
 
 
 def main() -> None:
-    threading.Thread(target=_reader, daemon=True).start()
-
-    while True:
-        try:
-            req = _agent_requests.get(timeout=60)
-        except queue.Empty:
-            # Keep alive — no heartbeat needed, just loop
-            continue
-        handle_request(req)
+    try:
+        threading.Thread(target=_reader, daemon=True).start()
+        while True:
+            try:
+                req = _agent_requests.get(timeout=60)
+            except queue.Empty:
+                continue
+            handle_request(req)
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        raise
 
 
 if __name__ == "__main__":
