@@ -23,3 +23,7 @@
 ### Screenshot 6: Settings & Privacy Control
 - **Focus:** Settings & Privacy dialog showing data transparency, local Anna APS KV storage guarantees, and one-click JSON Data Export and Data Deletion buttons.
 - **Caption:** Your practice data remains private to your Anna account, with full export and deletion rights.
+
+### Screenshot 7: Agent Session Multi-Turn Streaming
+- **Focus:** Active conversation with the "AI Coach (Agent Session)" label visible, streaming response tokens appearing in real time, and the cancel button available during generation.
+- **Caption:** Natural multi-turn conversations powered by Anna Agent Sessions with streaming and cancel support.
