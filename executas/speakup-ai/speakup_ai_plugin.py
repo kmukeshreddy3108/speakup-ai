@@ -22,6 +22,14 @@ import threading
 import traceback
 from datetime import datetime, timezone
 
+# Ensure UTF-8 stdio encoding and line-buffered stdout for JSON-RPC 2.0
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
+
 # ---------------------------------------------------------------------------
 # Protocol constants
 # ---------------------------------------------------------------------------
@@ -653,21 +661,27 @@ _sampling_available = True  # Optimistic by default; updated on error
 
 def _reader():
     """Read stdin in background thread; route to host response or request queue."""
-    for raw_line in sys.stdin:
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    try:
+        for raw_line in sys.stdin:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                sys.stderr.write(f"Malformed JSON-RPC line ignored: {line[:100]}\n")
+                sys.stderr.flush()
+                continue
 
-        if "method" in msg:
-            _agent_requests.put(msg)
-        else:
-            rid = msg.get("id")
-            if rid and rid in _host_responses:
-                _host_responses[rid].put(msg)
+            if "method" in msg:
+                _agent_requests.put(msg)
+            else:
+                rid = msg.get("id")
+                if rid and rid in _host_responses:
+                    _host_responses[rid].put(msg)
+    finally:
+        # Signal EOF to main loop
+        _agent_requests.put(None)
 
 
 def send(obj: dict) -> None:
@@ -1217,109 +1231,186 @@ TOOL_MAP = {
 
 MANIFEST = {
     "name": TOOL_ID,
+    "display_name": "SpeakUp AI Coach",
     "version": "0.3.2",
+    "description": "Personal English conversation coach providing contextual dialogue, grammar feedback, and notebook tracking.",
     "host_capabilities": ["llm.sample", "aps.kv"],
     "tools": [
         {
             "name": "ping",
             "description": "Smoke-test method.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            "parameters": [],
         },
         {
             "name": "health",
             "description": "Probe runtime status and Sampling capability.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            "parameters": [],
         },
         {
             "name": "get_scenarios",
             "description": "Return the list of available conversation scenarios.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            "parameters": [],
         },
         {
             "name": "start_session",
             "description": "Start a new coaching session for a given scenario.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "scenario": {"type": "string"},
-                },
-                "additionalProperties": False,
-            },
+            "parameters": [
+                {
+                    "name": "scenario",
+                    "type": "string",
+                    "description": "Conversation scenario key (e.g. introduction, job_interview, college, everyday)",
+                    "required": False,
+                    "default": "introduction",
+                }
+            ],
         },
         {
             "name": "coach_turn",
             "description": "Submit a user answer and receive coaching feedback.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "user_input": {"type": "string"},
-                    "scenario_key": {"type": "string"},
-                    "turn_number": {"type": "integer"},
-                    "session_id": {"type": "string"},
-                    "input_mode": {"type": "string", "enum": ["speech", "typed"]},
-                    "history": {"type": "array"},
+            "parameters": [
+                {
+                    "name": "user_input",
+                    "type": "string",
+                    "description": "User spoken or typed response",
+                    "required": True,
                 },
-                "required": ["user_input", "scenario_key", "turn_number", "session_id"],
-                "additionalProperties": False,
-            },
+                {
+                    "name": "scenario_key",
+                    "type": "string",
+                    "description": "Current conversation scenario key",
+                    "required": True,
+                },
+                {
+                    "name": "turn_number",
+                    "type": "integer",
+                    "description": "Current turn number in the session (1-based)",
+                    "required": True,
+                },
+                {
+                    "name": "session_id",
+                    "type": "string",
+                    "description": "Unique session UUID",
+                    "required": True,
+                },
+                {
+                    "name": "input_mode",
+                    "type": "string",
+                    "description": "Input mode: speech or typed",
+                    "required": False,
+                    "enum": ["speech", "typed"],
+                    "default": "speech",
+                },
+                {
+                    "name": "history",
+                    "type": "array",
+                    "items_type": "object",
+                    "description": "List of previous conversation turns",
+                    "required": False,
+                },
+            ],
         },
         {
             "name": "get_notebook",
             "description": "Return saved grammar mistakes from the notebook.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "limit": {"type": "integer"},
-                    "status": {"type": "string"},
-                    "search": {"type": "string"},
+            "parameters": [
+                {
+                    "name": "limit",
+                    "type": "integer",
+                    "description": "Maximum number of notebook items to return",
+                    "required": False,
+                    "default": 50,
                 },
-                "additionalProperties": False,
-            },
+                {
+                    "name": "status",
+                    "type": "string",
+                    "description": "Filter by item status: all, new, practising, fixed",
+                    "required": False,
+                    "enum": ["all", "new", "practising", "fixed"],
+                },
+                {
+                    "name": "search",
+                    "type": "string",
+                    "description": "Search query matching original text, correction, or rule",
+                    "required": False,
+                },
+            ],
         },
         {
             "name": "update_notebook_item",
             "description": "Update the status of a saved notebook item.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "status": {"type": "string", "enum": ["new", "practising", "fixed"]},
+            "parameters": [
+                {
+                    "name": "id",
+                    "type": "string",
+                    "description": "ID of notebook item to update",
+                    "required": True,
                 },
-                "required": ["id", "status"],
-                "additionalProperties": False,
-            },
+                {
+                    "name": "status",
+                    "type": "string",
+                    "description": "New status for item",
+                    "required": True,
+                    "enum": ["new", "practising", "fixed"],
+                },
+            ],
         },
         {
             "name": "delete_notebook_item",
             "description": "Delete a notebook item by id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                },
-                "required": ["id"],
-                "additionalProperties": False,
-            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "type": "string",
+                    "description": "ID of notebook item to delete",
+                    "required": True,
+                }
+            ],
         },
         {
             "name": "save_progress",
             "description": "Save real session progress metrics.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "sessions_completed": {"type": "integer"},
-                    "minutes_practised": {"type": "integer"},
-                    "answers_given": {"type": "integer"},
-                    "words_spoken": {"type": "integer"},
-                    "mistakes_detected": {"type": "integer"},
+            "parameters": [
+                {
+                    "name": "sessions_completed",
+                    "type": "integer",
+                    "description": "Count of sessions completed to add",
+                    "required": False,
+                    "default": 0,
                 },
-                "additionalProperties": False,
-            },
+                {
+                    "name": "minutes_practised",
+                    "type": "integer",
+                    "description": "Minutes of practice to add",
+                    "required": False,
+                    "default": 0,
+                },
+                {
+                    "name": "answers_given",
+                    "type": "integer",
+                    "description": "Count of answers given to add",
+                    "required": False,
+                    "default": 0,
+                },
+                {
+                    "name": "words_spoken",
+                    "type": "integer",
+                    "description": "Word count to add",
+                    "required": False,
+                    "default": 0,
+                },
+                {
+                    "name": "mistakes_detected",
+                    "type": "integer",
+                    "description": "Detected mistakes count to add",
+                    "required": False,
+                    "default": 0,
+                },
+            ],
         },
         {
             "name": "clear_all_data",
             "description": "Delete all stored notebook items and reset progress summary.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            "parameters": [],
         },
     ],
 }
@@ -1339,7 +1430,7 @@ def handle_request(req: dict) -> None:
                 "id": rid,
                 "result": {
                     "protocolVersion": PROTOCOL_VERSION,
-                    "serverInfo": {"name": TOOL_ID, "version": "0.3.2"},
+                    "serverInfo": {"name": TOOL_ID, "version": MANIFEST["version"]},
                     "capabilities": {"sampling": {}, "storage": {}},
                 },
             })
@@ -1385,13 +1476,19 @@ def main() -> None:
         threading.Thread(target=_reader, daemon=True).start()
         while True:
             try:
-                req = _agent_requests.get(timeout=60)
-            except queue.Empty:
-                continue
-            handle_request(req)
+                req = _agent_requests.get()
+            except Exception as e:
+                sys.stderr.write(f"Queue get error: {e}\n")
+                break
+            if req is None:
+                # Stdin reached EOF: clean shutdown
+                break
+            try:
+                handle_request(req)
+            except Exception:
+                traceback.print_exc(file=sys.stderr)
     except Exception:
         traceback.print_exc(file=sys.stderr)
-        raise
 
 
 if __name__ == "__main__":

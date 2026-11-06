@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 import speakup_ai_plugin as plugin
 
 
@@ -236,3 +237,110 @@ def test_fallback_answers_user_question_without_generic_praise():
     assert "topic" in data["follow_up"].lower()
     assert data["correction"]["errors"] == []
     assert data["correction"]["naturalAlternative"]
+
+
+def test_manifest_matches_anna_protocol_and_disk_manifest():
+    import json
+    from pathlib import Path
+
+    manifest = plugin.MANIFEST
+    assert manifest["name"] == plugin.TOOL_ID
+    assert manifest["version"] == "0.3.2"
+    assert "display_name" in manifest
+    assert "description" in manifest
+    assert isinstance(manifest["tools"], list)
+    assert len(manifest["tools"]) == 10
+
+    valid_types = {"string", "integer", "number", "boolean", "array", "object"}
+    tool_names = set()
+
+    for t in manifest["tools"]:
+        assert "name" in t
+        assert "description" in t
+        assert t["name"] not in tool_names, f"Duplicate tool name: {t['name']}"
+        tool_names.add(t["name"])
+
+        # Tool parameters must be a list of objects, NOT a JSON schema object
+        params = t.get("parameters")
+        assert isinstance(params, list), f"Tool {t['name']} parameters must be a list, got {type(params)}"
+
+        for p in params:
+            assert isinstance(p, dict)
+            assert "name" in p
+            assert "type" in p
+            assert p["type"] in valid_types, f"Invalid param type '{p['type']}' in tool {t['name']}"
+            if p["type"] == "array":
+                assert "items" in p or "items_type" in p, f"Array parameter {p['name']} missing items/items_type"
+
+    # Compare with manifest.json on disk
+    manifest_disk_path = Path(__file__).resolve().parent.parent / "manifest.json"
+    assert manifest_disk_path.exists(), f"Missing {manifest_disk_path}"
+    with open(manifest_disk_path, "r", encoding="utf-8") as f:
+        disk_data = json.load(f)
+    assert disk_data["name"] == manifest["name"]
+    assert disk_data["version"] == manifest["version"]
+    assert len(disk_data["tools"]) == len(manifest["tools"])
+
+
+def test_stdio_describe_and_clean_exit_on_eof():
+    import subprocess
+    import json
+    import sys
+
+    plugin_py = Path(plugin.__file__).resolve()
+    proc = subprocess.Popen(
+        [sys.executable, str(plugin_py)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    try:
+        # Request 1: describe
+        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "describe"}) + "\n")
+        proc.stdin.flush()
+        line1 = proc.stdout.readline()
+        assert line1, "describe produced no response"
+        resp1 = json.loads(line1.strip())
+        assert resp1["jsonrpc"] == "2.0"
+        assert resp1["id"] == 1
+        assert "result" in resp1
+        assert resp1["result"]["name"] == plugin.TOOL_ID
+        assert isinstance(resp1["result"]["tools"], list)
+
+        # Request 2: follow-up health request
+        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "health"}) + "\n")
+        proc.stdin.flush()
+        line2 = proc.stdout.readline()
+        assert line2, "health produced no response"
+        resp2 = json.loads(line2.strip())
+        assert resp2["jsonrpc"] == "2.0"
+        assert resp2["id"] == 2
+        assert resp2["result"]["status"] == "ready"
+
+        # Request 3: unknown method error check
+        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 3, "method": "unknown_test"}) + "\n")
+        proc.stdin.flush()
+        line3 = proc.stdout.readline()
+        resp3 = json.loads(line3.strip())
+        assert resp3["id"] == 3
+        assert resp3["error"]["code"] == -32601
+
+        # Request 4: malformed JSON ignored without crashing
+        proc.stdin.write("{not json}\n")
+        proc.stdin.flush()
+        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 4, "method": "ping"}) + "\n")
+        proc.stdin.flush()
+        line4 = proc.stdout.readline()
+        resp4 = json.loads(line4.strip())
+        assert resp4["id"] == 4
+
+        # Close stdin and assert clean exit
+        proc.stdin.close()
+        exit_code = proc.wait(timeout=3)
+        assert exit_code == 0, f"Process exited with non-zero code: {exit_code}"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
