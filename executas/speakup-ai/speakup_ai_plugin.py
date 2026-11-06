@@ -1232,7 +1232,7 @@ TOOL_MAP = {
 MANIFEST = {
     "name": TOOL_ID,
     "display_name": "SpeakUp AI Coach",
-    "version": "0.3.2",
+    "version": "0.3.3",
     "description": "Personal English conversation coach providing contextual dialogue, grammar feedback, and notebook tracking.",
     "host_capabilities": ["llm.sample", "aps.kv"],
     "tools": [

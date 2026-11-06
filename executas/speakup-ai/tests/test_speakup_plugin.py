@@ -245,7 +245,7 @@ def test_manifest_matches_anna_protocol_and_disk_manifest():
 
     manifest = plugin.MANIFEST
     assert manifest["name"] == plugin.TOOL_ID
-    assert manifest["version"] == "0.3.2"
+    assert manifest["version"] == "0.3.3"
     assert "display_name" in manifest
     assert "description" in manifest
     assert isinstance(manifest["tools"], list)
