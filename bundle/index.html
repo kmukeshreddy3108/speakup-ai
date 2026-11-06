@@ -510,6 +510,8 @@
 
       .recording-controls { display: none; gap: 8px; margin-top: 2px; }
       .recording-controls.active { display: flex; }
+      .agent-processing-controls { display: none; gap: 8px; margin-top: 2px; }
+      .agent-processing-controls.active { display: flex; }
       .btn-cancel-rec {
         background: var(--bg-elevated);
         border: 1px solid var(--border);
@@ -1075,6 +1077,11 @@
             <div class="recording-controls" id="recording-controls">
               <button class="btn-cancel-rec" id="cancel-voice-btn" type="button">✕ Cancel</button>
               <button class="btn-stop-rec" id="done-voice-btn" type="button">⏹ Finish & Send</button>
+            </div>
+
+            <!-- Agent Session Processing Cancel control -->
+            <div class="agent-processing-controls" id="agent-processing-controls">
+              <button class="btn-cancel-rec" id="cancel-agent-btn" type="button">✕ Cancel AI Response</button>
             </div>
 
             <!-- Compact live transcript -->
