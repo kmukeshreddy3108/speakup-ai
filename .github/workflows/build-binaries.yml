@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version string (e.g. 0.3.2)"
+        description: "Version string (e.g. 0.3.3)"
         required: true
-        default: "0.3.2"
+        default: "0.3.3"
 
 permissions:
   contents: write
@@ -138,10 +138,11 @@ jobs:
           set -e
           VERSION="${{ steps.vars.outputs.version }}"
           ARCHIVE="speakup-ai-${VERSION}-${{ matrix.platform }}.tar.gz"
-          mkdir -p package_root/bin
-          cp executas/speakup-ai/dist/${{ matrix.bin_name }} package_root/bin/
-          chmod +x package_root/bin/${{ matrix.bin_name }}
-          tar -czvf "${ARCHIVE}" -C package_root bin
+          mkdir -p package_root
+          cp executas/speakup-ai/dist/${{ matrix.bin_name }} package_root/
+          cp executas/speakup-ai/manifest.json package_root/
+          chmod +x package_root/${{ matrix.bin_name }}
+          tar -czvf "${ARCHIVE}" -C package_root ${{ matrix.bin_name }} manifest.json
           sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           mkdir -p artifacts
           mv "${ARCHIVE}" "${ARCHIVE}.sha256" artifacts/
@@ -153,16 +154,144 @@ jobs:
           $ErrorActionPreference = "Stop"
           $VERSION = "${{ steps.vars.outputs.version }}"
           $ARCHIVE = "speakup-ai-${VERSION}-${{ matrix.platform }}.zip"
-          New-Item -ItemType Directory -Path package_root\bin -Force | Out-Null
-          Copy-Item executas\speakup-ai\dist\${{ matrix.bin_name }} package_root\bin\
-          Compress-Archive -Path package_root\bin -DestinationPath $ARCHIVE -Force
+          New-Item -ItemType Directory -Path package_root -Force | Out-Null
+          Copy-Item executas\speakup-ai\dist\${{ matrix.bin_name }} package_root\
+          Copy-Item executas\speakup-ai\manifest.json package_root\
+          Compress-Archive -Path package_root\* -DestinationPath $ARCHIVE -Force
           $hash = (Get-FileHash -Path $ARCHIVE -Algorithm SHA256).Hash.ToLower()
           "$hash  $ARCHIVE" | Out-File -FilePath "${ARCHIVE}.sha256" -Encoding ascii
           New-Item -ItemType Directory -Path artifacts -Force | Out-Null
           Move-Item $ARCHIVE artifacts/
           Move-Item "${ARCHIVE}.sha256" artifacts/
 
-      - name: Upload artifact
+      - name: Smoke test built archive
+        shell: bash
+        run: |
+          set -e
+          VERSION="${{ steps.vars.outputs.version }}"
+          ARCHIVE_NAME="speakup-ai-${VERSION}-${{ matrix.platform }}.${{ matrix.archive_ext }}"
+          ARCHIVE_PATH="artifacts/${ARCHIVE_NAME}"
+          echo "Running smoke test on ${ARCHIVE_PATH}..."
+
+          TEST_DIR="smoke_test_tmp"
+          mkdir -p "${TEST_DIR}"
+
+          if [ "${{ matrix.archive_ext }}" = "tar.gz" ]; then
+            tar -xzvf "${ARCHIVE_PATH}" -C "${TEST_DIR}"
+            BIN_PATH="${TEST_DIR}/${{ matrix.bin_name }}"
+            chmod +x "${BIN_PATH}"
+          else
+            unzip -q "${ARCHIVE_PATH}" -d "${TEST_DIR}"
+            BIN_PATH="${TEST_DIR}/${{ matrix.bin_name }}"
+          fi
+
+          if [ ! -f "${BIN_PATH}" ]; then
+            echo "ERROR: Entrypoint not found at archive root: ${BIN_PATH}"
+            exit 1
+          fi
+
+          if [ ! -f "${TEST_DIR}/manifest.json" ]; then
+            echo "ERROR: manifest.json not found at archive root"
+            exit 1
+          fi
+
+          # Run smoke test script in python
+          python - << 'EOF'
+          import subprocess
+          import sys
+          import json
+          import time
+          from pathlib import Path
+
+          bin_path = sys.argv[1] if len(sys.argv) > 1 else "${BIN_PATH}"
+          expected_version = "${{ steps.vars.outputs.version }}"
+
+          print(f"Testing binary: {bin_path}")
+          start_time = time.time()
+          proc = subprocess.Popen(
+              [bin_path],
+              stdin=subprocess.PIPE,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+              text=True,
+              bufsize=1,
+          )
+
+          try:
+              # Step 1: Send describe
+              proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "describe"}) + "\n")
+              proc.stdin.flush()
+              line1 = proc.stdout.readline()
+              duration = time.time() - start_time
+              assert line1, f"Empty stdout response for describe (duration: {duration:.2f}s)"
+              assert duration < 5.0, f"Describe response exceeded 5s limit: {duration:.2f}s"
+
+              resp1 = json.loads(line1.strip())
+              assert resp1.get("jsonrpc") == "2.0", f"Invalid jsonrpc: {resp1}"
+              assert resp1.get("id") == 1, f"Mismatched id: {resp1}"
+              manifest = resp1.get("result")
+              assert isinstance(manifest, dict), f"Result not dict: {manifest}"
+              assert manifest.get("name") == "tool-dev-speakup-ai", f"Invalid name: {manifest.get('name')}"
+              assert manifest.get("version") == expected_version, f"Version mismatch: {manifest.get('version')} vs {expected_version}"
+              assert manifest.get("description"), "Missing manifest description"
+              tools = manifest.get("tools")
+              assert isinstance(tools, list) and len(tools) > 0, "Tools missing or empty"
+
+              valid_types = {"string", "integer", "number", "boolean", "array", "object"}
+              for t in tools:
+                  assert isinstance(t.get("name"), str) and t["name"], f"Invalid tool name: {t}"
+                  assert isinstance(t.get("description"), str), f"Missing description for {t.get('name')}"
+                  params = t.get("parameters")
+                  assert isinstance(params, list), f"Tool {t['name']} parameters MUST be list, got {type(params)}"
+                  for p in params:
+                      assert isinstance(p, dict), f"Param not dict: {p}"
+                      assert p.get("name"), f"Param missing name: {p}"
+                      assert p.get("type") in valid_types, f"Param {p.get('name')} invalid type: {p.get('type')}"
+                      if p.get("type") == "array":
+                          assert "items" in p or "items_type" in p, f"Array param missing items: {p}"
+
+              print(f"✓ Describe verified in {duration:.2f}s: {manifest['name']} v{manifest['version']} ({len(tools)} tools)")
+
+              # Step 2: Send health follow-up
+              proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "health"}) + "\n")
+              proc.stdin.flush()
+              line2 = proc.stdout.readline()
+              assert line2, "Empty stdout response for health"
+              resp2 = json.loads(line2.strip())
+              assert resp2.get("id") == 2, f"Mismatched id: {resp2}"
+              assert resp2.get("result", {}).get("status") == "ready", f"Health not ready: {resp2}"
+              print("✓ Health verified; process remained alive across multiple requests")
+
+              # Step 3: Close stdin and assert clean exit
+              proc.stdin.close()
+              exit_code = proc.wait(timeout=3)
+              assert exit_code == 0, f"Process non-zero exit code: {exit_code}"
+              print(f"✓ Clean exit on stdin EOF (exit code: {exit_code})")
+
+              # Save logs for artifacts
+              stderr_output = proc.stderr.read()
+              Path("smoke_test_stdout.log").write_text(f"{line1}{line2}", encoding="utf-8")
+              Path("smoke_test_stderr.log").write_text(stderr_output, encoding="utf-8")
+              print("✔ Smoke test PASSED for platform.")
+          except Exception as exc:
+              stderr_output = proc.stderr.read() if proc.stderr else ""
+              Path("smoke_test_stderr.log").write_text(stderr_output, encoding="utf-8")
+              print(f"STDERR output:\n{stderr_output}")
+              raise exc
+          finally:
+              if proc.poll() is None:
+                  proc.kill()
+          EOF
+
+      - name: Upload smoke test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-smoke-logs
+          path: smoke_test_*.log
+          if-no-files-found: ignore
+
+      - name: Upload archive artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-archive

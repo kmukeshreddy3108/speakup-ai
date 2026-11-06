@@ -1,0 +1,13 @@
+{
+  "name": "speakup-ai",
+  "version": "0.3.3",
+  "private": true,
+  "type": "module",
+  "description": "SpeakUp AI — Anna App English Conversation Practice Coach",
+  "scripts": {
+    "tool:describe": "node scripts/check-describe.js",
+    "check": "node scripts/check-describe.js && anna-app validate --strict",
+    "validate": "anna-app validate --strict"
+  }
+}
+

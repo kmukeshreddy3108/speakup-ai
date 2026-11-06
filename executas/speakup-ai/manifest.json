@@ -1,108 +1,185 @@
 {
   "name": "tool-dev-speakup-ai",
-  "version": "0.3.2",
+  "display_name": "SpeakUp AI Coach",
+  "version": "0.3.3",
+  "description": "Personal English conversation coach providing contextual dialogue, grammar feedback, and notebook tracking.",
   "host_capabilities": ["llm.sample", "aps.kv"],
   "tools": [
     {
       "name": "ping",
       "description": "Smoke-test method.",
-      "parameters": {"type": "object", "properties": {}, "additionalProperties": false}
+      "parameters": []
     },
     {
       "name": "health",
       "description": "Probe runtime status and Sampling capability.",
-      "parameters": {"type": "object", "properties": {}, "additionalProperties": false}
+      "parameters": []
     },
     {
       "name": "get_scenarios",
       "description": "Return the list of available conversation scenarios.",
-      "parameters": {"type": "object", "properties": {}, "additionalProperties": false}
+      "parameters": []
     },
     {
       "name": "start_session",
       "description": "Start a new coaching session for a given scenario.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "scenario": {"type": "string"}
-        },
-        "additionalProperties": false
-      }
+      "parameters": [
+        {
+          "name": "scenario",
+          "type": "string",
+          "description": "Conversation scenario key (e.g. introduction, job_interview, college, everyday)",
+          "required": false,
+          "default": "introduction"
+        }
+      ]
     },
     {
       "name": "coach_turn",
       "description": "Submit a user answer and receive coaching feedback.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "user_input": {"type": "string"},
-          "scenario_key": {"type": "string"},
-          "turn_number": {"type": "integer"},
-          "session_id": {"type": "string"},
-          "input_mode": {"type": "string", "enum": ["speech", "typed"]},
-          "history": {"type": "array"}
+      "parameters": [
+        {
+          "name": "user_input",
+          "type": "string",
+          "description": "User spoken or typed response",
+          "required": true
         },
-        "required": ["user_input", "scenario_key", "turn_number", "session_id"],
-        "additionalProperties": false
-      }
+        {
+          "name": "scenario_key",
+          "type": "string",
+          "description": "Current conversation scenario key",
+          "required": true
+        },
+        {
+          "name": "turn_number",
+          "type": "integer",
+          "description": "Current turn number in the session (1-based)",
+          "required": true
+        },
+        {
+          "name": "session_id",
+          "type": "string",
+          "description": "Unique session UUID",
+          "required": true
+        },
+        {
+          "name": "input_mode",
+          "type": "string",
+          "description": "Input mode: speech or typed",
+          "required": false,
+          "enum": ["speech", "typed"],
+          "default": "speech"
+        },
+        {
+          "name": "history",
+          "type": "array",
+          "items_type": "object",
+          "description": "List of previous conversation turns",
+          "required": false
+        }
+      ]
     },
     {
       "name": "get_notebook",
       "description": "Return saved grammar mistakes from the notebook.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "limit": {"type": "integer"},
-          "status": {"type": "string"},
-          "search": {"type": "string"}
+      "parameters": [
+        {
+          "name": "limit",
+          "type": "integer",
+          "description": "Maximum number of notebook items to return",
+          "required": false,
+          "default": 50
         },
-        "additionalProperties": false
-      }
+        {
+          "name": "status",
+          "type": "string",
+          "description": "Filter by item status: all, new, practising, fixed",
+          "required": false,
+          "enum": ["all", "new", "practising", "fixed"]
+        },
+        {
+          "name": "search",
+          "type": "string",
+          "description": "Search query matching original text, correction, or rule",
+          "required": false
+        }
+      ]
     },
     {
       "name": "update_notebook_item",
       "description": "Update the status of a saved notebook item.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "id": {"type": "string"},
-          "status": {"type": "string", "enum": ["new", "practising", "fixed"]}
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "ID of notebook item to update",
+          "required": true
         },
-        "required": ["id", "status"],
-        "additionalProperties": false
-      }
+        {
+          "name": "status",
+          "type": "string",
+          "description": "New status for item",
+          "required": true,
+          "enum": ["new", "practising", "fixed"]
+        }
+      ]
     },
     {
       "name": "delete_notebook_item",
       "description": "Delete a notebook item by id.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "id": {"type": "string"}
-        },
-        "required": ["id"],
-        "additionalProperties": false
-      }
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "description": "ID of notebook item to delete",
+          "required": true
+        }
+      ]
     },
     {
       "name": "save_progress",
       "description": "Save real session progress metrics.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "sessions_completed": {"type": "integer"},
-          "minutes_practised": {"type": "integer"},
-          "answers_given": {"type": "integer"},
-          "words_spoken": {"type": "integer"},
-          "mistakes_detected": {"type": "integer"}
+      "parameters": [
+        {
+          "name": "sessions_completed",
+          "type": "integer",
+          "description": "Count of sessions completed to add",
+          "required": false,
+          "default": 0
         },
-        "additionalProperties": false
-      }
+        {
+          "name": "minutes_practised",
+          "type": "integer",
+          "description": "Minutes of practice to add",
+          "required": false,
+          "default": 0
+        },
+        {
+          "name": "answers_given",
+          "type": "integer",
+          "description": "Count of answers given to add",
+          "required": false,
+          "default": 0
+        },
+        {
+          "name": "words_spoken",
+          "type": "integer",
+          "description": "Word count to add",
+          "required": false,
+          "default": 0
+        },
+        {
+          "name": "mistakes_detected",
+          "type": "integer",
+          "description": "Detected mistakes count to add",
+          "required": false,
+          "default": 0
+        }
+      ]
     },
     {
       "name": "clear_all_data",
       "description": "Delete all stored notebook items and reset progress summary.",
-      "parameters": {"type": "object", "properties": {}, "additionalProperties": false}
+      "parameters": []
     }
   ]
 }

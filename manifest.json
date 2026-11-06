@@ -29,6 +29,12 @@
     ],
     "host_api": {
       "tools": ["required:bundled:speakup-ai"],
+      "agent": {
+        "session": {
+          "auto": true
+        },
+        "tools": []
+      },
       "storage": ["get", "set", "list"],
       "window": ["set_title", "ready"],
       "audio": ["session"]

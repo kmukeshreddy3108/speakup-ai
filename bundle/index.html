@@ -510,6 +510,8 @@
 
       .recording-controls { display: none; gap: 8px; margin-top: 2px; }
       .recording-controls.active { display: flex; }
+      .agent-processing-controls { display: none; gap: 8px; margin-top: 2px; }
+      .agent-processing-controls.active { display: flex; }
       .btn-cancel-rec {
         background: var(--bg-elevated);
         border: 1px solid var(--border);
@@ -1077,6 +1079,11 @@
               <button class="btn-stop-rec" id="done-voice-btn" type="button">⏹ Finish & Send</button>
             </div>
 
+            <!-- Agent Session Processing Cancel control -->
+            <div class="agent-processing-controls" id="agent-processing-controls">
+              <button class="btn-cancel-rec" id="cancel-agent-btn" type="button">✕ Cancel AI Response</button>
+            </div>
+
             <!-- Compact live transcript -->
             <div class="transcript-preview" id="transcript-preview"></div>
           </div>
@@ -1267,7 +1274,7 @@
 
     </div><!-- #app -->
 
-    <script src="./anna-tool-ids.js"></script>
+    <script src="./anna-tool-ids.js" defer></script>
     <script src="./app.js" type="module"></script>
   </body>
 </html>

@@ -43,8 +43,12 @@ let sessionTurnsCount    = 0;
 let sessionMistakesCount = 0;
 let sessionVocabCount    = 0;
 let sessionWordsCount    = 0;
-let activeSource         = "rules"; // "ai" | "rules"
+let activeSource         = "rules"; // "agent" | "rules"
 let conversationHistory  = [];
+let agentSession         = null;
+let agentSessionAvailable= false;
+let activeRunId          = null;
+let isRunCancelled       = false;
 
 // Audio & Speech State
 let voiceState           = "ready"; // 'ready' | 'requesting' | 'listening' | 'processing' | 'speaking' | 'paused' | 'error'
@@ -141,6 +145,8 @@ const voiceStatusText     = $("voice-status-text");
 const recordingControls   = $("recording-controls");
 const doneVoiceBtn        = $("done-voice-btn");
 const cancelVoiceBtn      = $("cancel-voice-btn");
+const agentProcessingControls = $("agent-processing-controls");
+const cancelAgentBtn      = $("cancel-agent-btn");
 const transcriptPreview   = $("transcript-preview");
 
 // Speech Diagnostic
@@ -790,17 +796,79 @@ function updateTimerUI() {
 
 function updateCoachLabel(source) {
   activeSource = source;
-  if (source === "ai") {
+  if (source === "agent" || source === "ai") {
     coachLabel.className = "coach-label";
     coachLabelIcon.textContent = "✨";
-    coachLabelText.textContent = "AI Coach";
-    aiBadge.textContent = "✨ Anna LLM Sampling active";
+    coachLabelText.textContent = "AI Coach (Agent Session)";
+    aiBadge.textContent = "✨ Anna Agent Session active";
   } else {
     coachLabel.className = "coach-label rules";
     coachLabelIcon.textContent = "📝";
     coachLabelText.textContent = "Coach (basic mode)";
     aiBadge.textContent = "📝 Rule-based basic mode";
   }
+}
+
+async function getOrCreateAgentSession(scenarioTitle) {
+  if (!annaAvailable || !anna?.agent?.session) {
+    agentSessionAvailable = false;
+    return null;
+  }
+  const systemPrompt = `You are SpeakUp AI, an encouraging and natural English conversation practice coach.
+Current practice scenario: ${scenarioTitle || selectedScenario}.
+Guidelines:
+1. Provide a natural, friendly 1 to 2 sentence conversational reply to what the student said.
+2. Ask ONE clear open-ended question to keep the conversation going and encourage the student to practice speaking English.
+3. Be supportive, warm, and engaging.
+4. Keep replies conversational and spoken-style. Do NOT use bullet points, markdown formatting, or lengthy explanations.`;
+
+  const savedUuid = localStorage.getItem("speakup_agent_session_uuid");
+  if (savedUuid) {
+    try {
+      const existing = anna.agent.session.attach(savedUuid);
+      await existing.refresh();
+      agentSession = existing;
+      agentSessionAvailable = true;
+      return existing;
+    } catch (e) {
+      console.warn("Could not refresh existing agent session, creating new:", e);
+      localStorage.removeItem("speakup_agent_session_uuid");
+    }
+  }
+
+  try {
+    const created = await anna.agent.session({
+      submode: "auto",
+      systemPrompt,
+    });
+    agentSession = created;
+    agentSessionAvailable = true;
+    if (created?.app_session_uuid) {
+      localStorage.setItem("speakup_agent_session_uuid", created.app_session_uuid);
+    }
+    return created;
+  } catch (err) {
+    console.warn("Agent session creation failed, falling back to basic mode:", err);
+    agentSession = null;
+    agentSessionAvailable = false;
+    return null;
+  }
+}
+
+function cancelActiveRun() {
+  if (!isSubmitting) return;
+  isRunCancelled = true;
+  if (activeRunId && agentSession) {
+    agentSession.cancel(activeRunId).catch((err) => {
+      console.warn("Cancel agent run error:", err);
+    });
+  }
+  if (agentProcessingControls) agentProcessingControls.classList.remove("active");
+  isSubmitting = false;
+  doneVoiceBtn.disabled = false;
+  sendBtn.disabled      = false;
+  setVoiceState("ready", "AI response cancelled");
+  toast("Response cancelled", "info");
 }
 
 // ─── Feedback & Notebook Rendering ───────────────────────────────────────────
@@ -1064,6 +1132,7 @@ async function startSession() {
   sessionWordsCount    = 0;
   recognizedText       = "";
   conversationHistory  = [];
+  isRunCancelled       = false;
 
   chatMessages.innerHTML = "";
   feedbackDeck.classList.remove("visible");
@@ -1085,10 +1154,14 @@ async function startSession() {
   scenarioKey = d.scenario_key;
   turnNumber  = 1;
 
-  convTitle.textContent    = d.scenario_title || "Practice Session";
-  convSubtitle.textContent = `Turn 1 · ${d.source === "ai" ? "AI coach" : "Basic mode: AI unavailable"}`;
+  // Initialize or attach Agent Session
+  const session = await getOrCreateAgentSession(d.scenario_title);
+  const source = session ? "agent" : (d.source || "rules");
 
-  updateCoachLabel(d.source || "rules");
+  convTitle.textContent    = d.scenario_title || "Practice Session";
+  convSubtitle.textContent = `Turn 1 · ${source === "agent" ? "AI Coach (Agent Session)" : "Basic mode (rules)"}`;
+
+  updateCoachLabel(source);
   recognitionRetryCount = 0;
 
   // Reset inputs
@@ -1157,6 +1230,7 @@ async function submitTurn(providedText) {
   }
 
   isSubmitting = true;
+  isRunCancelled = false;
   stopListening();
   stopCoachAudio();
 
@@ -1176,6 +1250,67 @@ async function submitTurn(providedText) {
   sessionWordsCount += wordCount;
   sessionTurnsCount += 1;
 
+  let coachText = "";
+  let usedAgent = false;
+
+  // Stream turn via Agent Session if available
+  if (agentSessionAvailable && agentSession) {
+    if (agentProcessingControls) agentProcessingControls.classList.add("active");
+    setVoiceState("processing", "AI Coach is generating reply…");
+    const runId = "run-" + Date.now();
+    activeRunId = runId;
+
+    try {
+      const stream = agentSession.run({
+        run_id: runId,
+        content: `Student said: "${text}"`,
+      });
+
+      let accumulated = "";
+      for await (const chunk of stream) {
+        if (isRunCancelled) break;
+        if (!chunk || typeof chunk !== "object") continue;
+
+        let delta = "";
+        if (chunk.event === "model_token" || chunk.event === "text_delta") {
+          delta = chunk.text || chunk.delta || "";
+        } else if (chunk.text && chunk.event !== "complete") {
+          delta = chunk.text;
+        } else if (chunk.delta?.text) {
+          delta = chunk.delta.text;
+        } else if (chunk.content?.text && !accumulated) {
+          delta = chunk.content.text;
+        }
+
+        if (delta) {
+          accumulated += delta;
+          coachPromptText.textContent = accumulated;
+        }
+      }
+
+      if (isRunCancelled) {
+        if (agentProcessingControls) agentProcessingControls.classList.remove("active");
+        doneVoiceBtn.disabled = false;
+        sendBtn.disabled      = false;
+        isSubmitting          = false;
+        setVoiceState("ready", "Turn cancelled");
+        toast("AI response was cancelled", "info");
+        return;
+      }
+
+      if (accumulated.trim()) {
+        coachText = accumulated.trim();
+        usedAgent = true;
+      }
+    } catch (agentErr) {
+      console.warn("Agent run error, falling back to rule engine:", agentErr);
+      agentSessionAvailable = false;
+    } finally {
+      if (agentProcessingControls) agentProcessingControls.classList.remove("active");
+    }
+  }
+
+  // Always invoke coach_turn for grammar verification and notebook updates
   const res = await callTool("coach_turn", {
     user_input:   text,
     scenario_key: scenarioKey,
@@ -1189,25 +1324,26 @@ async function submitTurn(providedText) {
   sendBtn.disabled      = false;
   isSubmitting          = false;
 
-  if (!res.success) {
+  if (!res.success && !coachText) {
     setVoiceState("ready");
     toast(res.error || "Something went wrong. Please try again.", "error");
     return;
   }
 
-  const d = res.data;
-  updateCoachLabel(d.source || "rules");
+  const d = res.data || {};
+  const currentSource = usedAgent ? "agent" : (d.source || "rules");
+  updateCoachLabel(currentSource);
 
   turnNumber = d.next_turn_number || (turnNumber + 1);
-  convSubtitle.textContent = `Turn ${turnNumber} · ${d.source === "ai" ? "AI coach" : "Basic mode: AI unavailable"}`;
+  convSubtitle.textContent = `Turn ${turnNumber} · ${currentSource === "agent" ? "AI Coach (Agent Session)" : "Basic mode (rules)"}`;
 
   if (d.correction && !d.correction.isCorrect) {
     sessionMistakesCount += 1;
     loadProgress(); // Reload notebook in background
   }
 
-  // Display Coach response guaranteed non-repetitive
-  displayCoachTurn(d.full_message || `${d.coach_reply} ${d.follow_up || ""}`.trim(), d.hint, d.vocabulary || []);
+  const finalCoachMessage = coachText || d.full_message || `${d.coach_reply} ${d.follow_up || ""}`.trim();
+  displayCoachTurn(finalCoachMessage, d.hint, d.vocabulary || []);
   displayLiveFeedback(d.grammar_notes || [], d.correction);
 
   setVoiceState("ready");
@@ -1219,6 +1355,17 @@ async function endSession(reason = "complete") {
   stopTimer();
   stopListening();
   stopCoachAudio();
+
+  if (agentSession) {
+    try {
+      await agentSession.delete();
+    } catch (e) {
+      console.warn("Error deleting agent session:", e);
+    }
+    agentSession = null;
+    agentSessionAvailable = false;
+    localStorage.removeItem("speakup_agent_session_uuid");
+  }
 
   const elapsedMins = Math.max(1, Math.round((selectedDurationMins * 60 - secsLeft) / 60));
 
@@ -1468,6 +1615,7 @@ async function main() {
 
   doneVoiceBtn.addEventListener("click", () => submitTurn());
   cancelVoiceBtn.addEventListener("click", () => cancelSpeechInput());
+  cancelAgentBtn?.addEventListener("click", () => cancelActiveRun());
 
   // Duration Selector Bindings
   if (durationSelector) {
@@ -1544,6 +1692,7 @@ async function main() {
     if (e.key === "Escape") {
       vocabPopup.classList.remove("visible");
       privacyModal?.classList.remove("open");
+      if (isSubmitting) cancelActiveRun();
       if (isListening) stopListening();
       stopCoachAudio();
     }
