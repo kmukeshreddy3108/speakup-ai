@@ -662,7 +662,10 @@ _sampling_available = True  # Optimistic by default; updated on error
 def _reader():
     """Read stdin in background thread; route to host response or request queue."""
     try:
-        for raw_line in sys.stdin:
+        while True:
+            raw_line = sys.stdin.readline()
+            if not raw_line:
+                break
             line = raw_line.strip()
             if not line:
                 continue
