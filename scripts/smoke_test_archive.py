@@ -54,6 +54,9 @@ def main():
     proc = None
     stdout_lines = []
     max_describe_duration = 15.0 if sys.platform == "win32" else 10.0
+    sub_env = os.environ.copy()
+    sub_env["PYTHONUNBUFFERED"] = "1"
+    sub_env["PYTHONIOENCODING"] = "utf-8"
     try:
         proc = subprocess.Popen(
             [str(bin_path)],
@@ -62,6 +65,7 @@ def main():
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=sub_env,
         )
 
         # 1. Send describe
