@@ -181,7 +181,7 @@ jobs:
             BIN_PATH="${TEST_DIR}/${{ matrix.bin_name }}"
             chmod +x "${BIN_PATH}"
           else
-            unzip -q "${ARCHIVE_PATH}" -d "${TEST_DIR}"
+            python -m zipfile -e "${ARCHIVE_PATH}" "${TEST_DIR}"
             BIN_PATH="${TEST_DIR}/${{ matrix.bin_name }}"
           fi
 

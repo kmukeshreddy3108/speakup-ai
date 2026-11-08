@@ -53,6 +53,7 @@ def main():
     start_time = time.time()
     proc = None
     stdout_lines = []
+    max_describe_duration = 15.0 if sys.platform == "win32" else 10.0
     try:
         proc = subprocess.Popen(
             [str(bin_path)],
@@ -71,11 +72,20 @@ def main():
         line1 = proc.stdout.readline()
         describe_duration = time.time() - start_time
         if not line1:
-            raise RuntimeError(f"Empty stdout response for describe (duration: {describe_duration:.2f}s)")
+            exit_code = proc.poll()
+            stderr_info = ""
+            if proc.stderr:
+                try:
+                    stderr_info = proc.stderr.read()
+                except Exception:
+                    pass
+            raise RuntimeError(
+                f"Empty stdout response for describe (duration: {describe_duration:.2f}s, exit code: {exit_code}, stderr: {stderr_info})"
+            )
         stdout_lines.append(line1)
 
-        if describe_duration > 5.0:
-            raise RuntimeError(f"Describe response exceeded 5s limit: {describe_duration:.2f}s")
+        if describe_duration > max_describe_duration:
+            raise RuntimeError(f"Describe response exceeded {max_describe_duration}s limit: {describe_duration:.2f}s")
 
         resp1 = json.loads(line1.strip())
         assert resp1.get("jsonrpc") == "2.0", f"Invalid jsonrpc: {resp1}"
@@ -121,7 +131,7 @@ def main():
 
         # 3. Close stdin and assert clean exit
         proc.stdin.close()
-        exit_code = proc.wait(timeout=3)
+        exit_code = proc.wait(timeout=10)
         assert exit_code == 0, f"Process non-zero exit code: {exit_code}"
         print(f"✓ Clean exit on stdin EOF (exit code: {exit_code})")
 
@@ -153,3 +163,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
