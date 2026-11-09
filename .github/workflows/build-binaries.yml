@@ -164,7 +164,8 @@ jobs:
           Move-Item $ARCHIVE artifacts/
           Move-Item "${ARCHIVE}.sha256" artifacts/
 
-      - name: Smoke test built archive
+      - name: Smoke test built archive (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
@@ -176,14 +177,9 @@ jobs:
           TEST_DIR="smoke_test_tmp"
           mkdir -p "${TEST_DIR}"
 
-          if [ "${{ matrix.archive_ext }}" = "tar.gz" ]; then
-            tar -xzvf "${ARCHIVE_PATH}" -C "${TEST_DIR}"
-            BIN_PATH="${TEST_DIR}/${{ matrix.bin_name }}"
-            chmod +x "${BIN_PATH}"
-          else
-            python -m zipfile -e "${ARCHIVE_PATH}" "${TEST_DIR}"
-            BIN_PATH="${TEST_DIR}/${{ matrix.bin_name }}"
-          fi
+          tar -xzvf "${ARCHIVE_PATH}" -C "${TEST_DIR}"
+          BIN_PATH="${TEST_DIR}/${{ matrix.bin_name }}"
+          chmod +x "${BIN_PATH}"
 
           if [ ! -f "${BIN_PATH}" ]; then
             echo "ERROR: Entrypoint not found at archive root: ${BIN_PATH}"
@@ -196,6 +192,34 @@ jobs:
           fi
 
           python scripts/smoke_test_archive.py "${BIN_PATH}" "${VERSION}" "${TEST_DIR}/manifest.json"
+
+      - name: Smoke test built archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $VERSION = "${{ steps.vars.outputs.version }}"
+          $ARCHIVE_NAME = "speakup-ai-$VERSION-${{ matrix.platform }}.${{ matrix.archive_ext }}"
+          $ARCHIVE_PATH = "artifacts/$ARCHIVE_NAME"
+          Write-Host "Running smoke test on $ARCHIVE_PATH..."
+
+          $TEST_DIR = "smoke_test_tmp"
+          New-Item -ItemType Directory -Path $TEST_DIR -Force | Out-Null
+
+          python -m zipfile -e $ARCHIVE_PATH $TEST_DIR
+          $BIN_PATH = "$TEST_DIR/${{ matrix.bin_name }}"
+
+          if (-not (Test-Path $BIN_PATH)) {
+            Write-Error "ERROR: Entrypoint not found at archive root: $BIN_PATH"
+            exit 1
+          }
+
+          if (-not (Test-Path "$TEST_DIR/manifest.json")) {
+            Write-Error "ERROR: manifest.json not found at archive root"
+            exit 1
+          }
+
+          python scripts/smoke_test_archive.py $BIN_PATH $VERSION "$TEST_DIR/manifest.json"
 
       - name: Upload smoke test logs
         if: always()
