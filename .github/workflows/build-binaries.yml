@@ -162,8 +162,7 @@ jobs:
           Copy-Item executas\speakup-ai\dist\${{ matrix.bin_name }} package_root\
           Copy-Item executas\speakup-ai\manifest.json package_root\
           Compress-Archive -Path package_root\* -DestinationPath $ARCHIVE -Force
-          $hash = (Get-FileHash -Path $ARCHIVE -Algorithm SHA256).Hash.ToLower()
-          "$hash  $ARCHIVE" | Out-File -FilePath "${ARCHIVE}.sha256" -Encoding ascii
+          python -c "import hashlib; h = hashlib.sha256(open('$ARCHIVE','rb').read()).hexdigest(); open('$ARCHIVE.sha256','w',newline='\n',encoding='utf-8').write(f'{h}  $ARCHIVE\n')"
           New-Item -ItemType Directory -Path artifacts -Force | Out-Null
           Move-Item $ARCHIVE artifacts/
           Move-Item "${ARCHIVE}.sha256" artifacts/
@@ -258,22 +257,27 @@ jobs:
             echo "version=${TAG}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Download all build artifacts
+      - name: Download build archives
         uses: actions/download-artifact@v4
         with:
-          path: all_artifacts
+          pattern: "*-archive"
+          path: release_assets
           merge-multiple: true
+
+      - name: Verify release asset integrity
+        run: |
+          python scripts/verify_release_assets.py release_assets executas/speakup-ai/executa.json "${{ steps.vars.outputs.version }}"
 
       - name: List release assets
         run: |
-          echo "Release assets:"
-          ls -la all_artifacts/
+          echo "Release assets to be published:"
+          ls -la release_assets/
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ steps.vars.outputs.version }}"
           name: "SpeakUp AI Executa v${{ steps.vars.outputs.version }}"
-          files: all_artifacts/*
+          files: release_assets/*
           draft: false
           prerelease: false
