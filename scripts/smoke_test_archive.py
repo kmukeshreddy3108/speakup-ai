@@ -13,6 +13,14 @@ import sys
 import time
 from pathlib import Path
 
+# Ensure UTF-8 stdio encoding even on Windows runners with cp1252 consoles
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 VALID_TYPES = {"string", "integer", "number", "boolean", "array", "object"}
 
 
@@ -48,7 +56,7 @@ def main():
             assert manifest_json.get("version") == expected_version, (
                 f"manifest.json version {manifest_json.get('version')} does not match expected {expected_version}"
             )
-        print("✓ Root manifest.json verified")
+        print("[OK] Root manifest.json verified")
 
     start_time = time.time()
     proc = None
@@ -116,7 +124,7 @@ def main():
                 if p.get("type") == "array":
                     assert "items" in p or "items_type" in p, f"Array param missing items: {p}"
 
-        print(f"✓ Describe verified in {describe_duration:.2f}s: {manifest['name']} v{manifest['version']} ({len(tools)} tools)")
+        print(f"[OK] Describe verified in {describe_duration:.2f}s: {manifest['name']} v{manifest['version']} ({len(tools)} tools)")
 
         # 2. Send health follow-up
         req2 = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "health"}) + "\n"
@@ -131,19 +139,19 @@ def main():
         resp2 = json.loads(line2.strip())
         assert resp2.get("id") == 2, f"Mismatched id: {resp2}"
         assert resp2.get("result", {}).get("status") == "ready", f"Health not ready: {resp2}"
-        print("✓ Health verified; process remained alive across multiple requests")
+        print("[OK] Health verified; process remained alive across multiple requests")
 
         # 3. Close stdin and assert clean exit
         proc.stdin.close()
         exit_code = proc.wait(timeout=10)
         assert exit_code == 0, f"Process non-zero exit code: {exit_code}"
-        print(f"✓ Clean exit on stdin EOF (exit code: {exit_code})")
+        print(f"[OK] Clean exit on stdin EOF (exit code: {exit_code})")
 
         # Save logs
         stderr_output = proc.stderr.read()
         Path("smoke_test_stdout.log").write_text("".join(stdout_lines), encoding="utf-8")
         Path("smoke_test_stderr.log").write_text(stderr_output, encoding="utf-8")
-        print("✔ Smoke test PASSED successfully!")
+        print("[OK] Smoke test PASSED successfully!")
 
     except Exception as exc:
         print(f"\n[ERROR] Smoke test failed: {exc}", file=sys.stderr)
