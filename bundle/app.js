@@ -13,6 +13,12 @@
  */
 
 import { AnnaAppRuntime } from "/static/anna-apps/_sdk/latest/index.js";
+import { readAgentStream, parseCoachStructuredResponse, cleanSentinels, isStreamSentinel, extractTextDelta } from "./agent-stream.js";
+import { StorageAdapter, runStorageMigration, exportAllUserData, restoreUserData, KEY_PROFILE, KEY_SETTINGS, KEY_HISTORY, DEFAULT_SETTINGS } from "./storage-migration.js";
+import { LearnerProfileManager, ONBOARDING_QUESTIONS } from "./learner-profile.js";
+import { SCENARIO_CATALOG, TONE_OPTIONS, DIFFICULTY_OPTIONS, pickSurpriseScenario } from "./scenarios.js";
+import { parseVoiceCommand, autoFormatTranscript, EarconPlayer, WakeLockManager, setupMediaSession, getAvailableAudioDevices } from "./hands-free.js";
+import { formatSpokenTurn, sanitizeCorrection, buildSessionSummary, generateSpacedRepetitionCards } from "./hybrid-coach.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const EXECUTA_HANDLE       = "speakup-ai";
@@ -24,7 +30,7 @@ const DEFAULT_SESSION_SECS = 10 * 60; // 10 minutes
 let anna             = null;
 let annaAvailable    = false;
 
-let selectedScenario     = "introduction";
+let selectedScenario     = "everyday";
 let selectedDurationMins = 10;
 let sessionId            = null;
 let scenarioKey          = null;
@@ -63,6 +69,18 @@ let handsFreeEnabled = false;
 let recognitionRetryCount = 0;
 let recognitionRetryTimer = null;
 let speechRate = 1;
+
+// ─── New: Profile, Migration & Hands-Free Engines ─────────────────────────────
+const storageAdapter     = new StorageAdapter();
+const profileManager     = new LearnerProfileManager(storageAdapter);
+const earconPlayer       = new EarconPlayer();
+const wakeLockMgr        = new WakeLockManager();
+let selectedTone         = "friendly";
+let selectedDifficulty   = "intermediate";
+let selectedMode         = "screen"; // "screen" | "handsfree"
+let sessionMistakes      = []; // Array of correction objects for session summary
+let sessionVocabulary    = []; // Vocab collected this session
+let speechEndTimestamp   = 0;  // For latency measurement
 
 // Notebook & Progress
 let notebookEntries      = [];
@@ -275,12 +293,12 @@ function standaloneStub(method, args) {
     return {
       success: true,
       data: {
-        scenarios: [
-          { key: "introduction",       title: "Self-Introduction",     icon: "👋", description: "Practice introducing yourself clearly and confidently" },
-          { key: "job_interview",      title: "Job Interview",         icon: "💼", description: "Master behavioral and background interview questions" },
-          { key: "college_discussion", title: "College Discussion",    icon: "🎓", description: "Academic and seminar discussions" },
-          { key: "everyday",           title: "Everyday Conversation", icon: "☕", description: "Casual English for social situations" },
-        ],
+        scenarios: SCENARIO_CATALOG.map(s => ({
+          key: s.key,
+          title: s.title,
+          icon: s.icon,
+          description: s.description,
+        })),
       },
     };
   }
@@ -656,43 +674,92 @@ async function startListening() {
     showSpeechDiagnostic("Failed to activate speech recognition. Please type your response below.");
     expandTypeDrawer();
   }
+}
 
-  function toggleHandsFree() {
-    handsFreeEnabled = !handsFreeEnabled;
-    if (handsfreeToggleBtn) {
-      handsfreeToggleBtn.classList.toggle("active", handsFreeEnabled);
-      handsfreeToggleBtn.setAttribute("aria-pressed", String(handsFreeEnabled));
-    }
-    if (handsFreeEnabled) {
+function toggleHandsFree() {
+  handsFreeEnabled = !handsFreeEnabled;
+  if (handsfreeToggleBtn) {
+    handsfreeToggleBtn.classList.toggle("active", handsFreeEnabled);
+    handsfreeToggleBtn.setAttribute("aria-pressed", String(handsFreeEnabled));
+  }
+
+  const hfOverlay = $("handsfree-overlay");
+
+  if (handsFreeEnabled) {
+    autoListenAfterCoach = true;
+    if (hfOverlay) hfOverlay.classList.add("active");
+    toast("Hands-free on. Speak after the coach finishes.", "info");
+    earconPlayer.playCommandConfirmed();
+    wakeLockMgr.requestLock().then(acquired => {
+      const badge = $("hf-wakelock-badge");
+      if (badge) badge.textContent = acquired ? "💡 Wake Lock active" : "💡 Wake Lock unavailable";
+    });
+    if (!isListening && !isPaused && !isSubmitting) startListening();
+  } else {
+    if (hfOverlay) hfOverlay.classList.remove("active");
+    wakeLockMgr.releaseLock();
+    clearTimeout(recognitionRetryTimer);
+    toast("Hands-free off. Tap Finish & Send when ready.", "info");
+  }
+}
+
+function handleVoiceCommand(text) {
+  const result = parseVoiceCommand(text);
+  if (!result.isCommand) return false;
+
+  earconPlayer.playCommandConfirmed();
+
+  switch (result.commandId) {
+    case "pause":
+      if (!isPaused) togglePauseSession();
+      return true;
+    case "resume":
+      if (isPaused) togglePauseSession();
+      return true;
+    case "repeat":
+      replayCoachPrompt();
+      return true;
+    case "slower":
+      speechRate = Math.max(0.6, speechRate - 0.2);
+      toast(`Coach speed: ${speechRate.toFixed(1)}x`, "info");
+      replayCoachPrompt();
+      return true;
+    case "faster":
+      speechRate = Math.min(1.6, speechRate + 0.2);
+      toast(`Coach speed: ${speechRate.toFixed(1)}x`, "info");
+      replayCoachPrompt();
+      return true;
+    case "correct_me":
       autoListenAfterCoach = true;
-      toast("Hands-free on. Speak after the coach finishes.", "info");
-      if (!isListening && !isPaused && !isSubmitting) startListening();
-    } else {
-      clearTimeout(recognitionRetryTimer);
-      toast("Hands-free off. Tap Finish & Send when ready.", "info");
-    }
+      toast("Corrections are on.", "info");
+      return true;
+    case "dont_correct_me":
+      toast("Corrections remain in your notebook; spoken corrections are paused.", "info");
+      return true;
+    case "what_did_i_do_wrong":
+      tabNotebook?.click();
+      return true;
+    case "end_session":
+      endSession("manual");
+      return true;
+    case "give_topic":
+      const profile = profileManager.getProfile();
+      const surprise = pickSurpriseScenario(profile);
+      toast(`Topic suggestion: ${surprise.title}`, "info");
+      return true;
+    case "how_do_you_say":
+      toast(`Looking up: "${result.arg}"`, "info");
+      return false; // Let it pass through as a turn so the AI can answer
+    default:
+      return false;
   }
 }
 
 function stopListening() {
   isListening = false;
+  speechEndTimestamp = Date.now(); // Record for latency measurement
   if (recognition) {
     try { recognition.stop(); } catch {}
-  }
-
-  function handleVoiceCommand(text) {
-    const command = text.trim().toLowerCase();
-    if (command === "pause") { if (!isPaused) togglePauseSession(); return true; }
-    if (command === "resume") { if (isPaused) togglePauseSession(); return true; }
-    if (command === "repeat") { replayCoachPrompt(); return true; }
-    if (command === "say it slower") { speechRate = 0.75; replayCoachPrompt(); return true; }
-    if (command === "faster") { speechRate = 1.25; replayCoachPrompt(); return true; }
-    if (command === "correct me") { autoListenAfterCoach = true; toast("Corrections are on.", "info"); return true; }
-    if (command === "don't correct me" || command === "dont correct me") { toast("Corrections remain in your notebook; spoken corrections are off.", "info"); return true; }
-    if (command === "what did i do wrong") { tabNotebook?.click(); return true; }
-    if (command === "end session") { endSession("manual"); return true; }
-    if (command.startsWith("change topic to ")) { toast(`Topic requested: ${text.slice(16)}`, "info"); return false; }
-    return false;
   }
   if (voiceState === "listening" || voiceState === "requesting") {
     setVoiceState("ready");
@@ -814,13 +881,22 @@ async function getOrCreateAgentSession(scenarioTitle) {
     agentSessionAvailable = false;
     return null;
   }
+  const profileContext = profileManager.getCoachPromptContext();
+  const toneOption = TONE_OPTIONS.find(t => t.id === selectedTone) || TONE_OPTIONS[0];
+  const diffOption = DIFFICULTY_OPTIONS.find(d => d.id === selectedDifficulty) || DIFFICULTY_OPTIONS[1];
   const systemPrompt = `You are SpeakUp AI, an encouraging and natural English conversation practice coach.
 Current practice scenario: ${scenarioTitle || selectedScenario}.
+${toneOption.promptModifier}
+${diffOption.promptModifier}
+
+${profileContext}
+
 Guidelines:
 1. Provide a natural, friendly 1 to 2 sentence conversational reply to what the student said.
 2. Ask ONE clear open-ended question to keep the conversation going and encourage the student to practice speaking English.
 3. Be supportive, warm, and engaging.
-4. Keep replies conversational and spoken-style. Do NOT use bullet points, markdown formatting, or lengthy explanations.`;
+4. Keep replies conversational and spoken-style. Do NOT use bullet points, markdown formatting, or lengthy explanations.
+5. When the student makes a grammar mistake, briefly note the correct form before continuing.`;
 
   const savedUuid = localStorage.getItem("speakup_agent_session_uuid");
   if (savedUuid) {
@@ -1075,16 +1151,31 @@ function appendHistoryMessage(role, text) {
 // ─── Scenario & Session Flow ─────────────────────────────────────────────────
 
 async function loadScenarios() {
+  let scenarios = SCENARIO_CATALOG;
   const res = await callTool("get_scenarios", {});
-  if (!res.success || !res.data?.scenarios) return;
+  if (res.success && res.data?.scenarios && res.data.scenarios.length > 0) {
+    const validBackend = res.data.scenarios.filter((s) => s.key !== "introduction");
+    if (validBackend.length >= SCENARIO_CATALOG.length) {
+      scenarios = validBackend;
+    } else {
+      const backendMap = new Map(validBackend.map((s) => [s.key, s]));
+      scenarios = SCENARIO_CATALOG.map((cat) => ({
+        ...cat,
+        ...(backendMap.get(cat.key) || {}),
+      }));
+    }
+  }
 
-  const scenarios = res.data.scenarios;
+  // Ensure 'introduction' is excluded from the picker (Step 3 requirement)
+  scenarios = scenarios.filter((s) => s.key !== "introduction");
   scenarioGrid.innerHTML = "";
 
   scenarios.forEach((s) => {
     const card = document.createElement("div");
     card.className = `scenario-card ${s.key === selectedScenario ? "selected" : ""}`;
     card.dataset.key = s.key;
+    card.dataset.id = s.key;
+    card.setAttribute("data-id", s.key);
     card.setAttribute("role", "button");
     card.setAttribute("tabindex", "0");
     card.innerHTML = `
@@ -1266,26 +1357,21 @@ async function submitTurn(providedText) {
         content: `Student said: "${text}"`,
       });
 
-      let accumulated = "";
-      for await (const chunk of stream) {
-        if (isRunCancelled) break;
-        if (!chunk || typeof chunk !== "object") continue;
-
-        let delta = "";
-        if (chunk.event === "model_token" || chunk.event === "text_delta") {
-          delta = chunk.text || chunk.delta || "";
-        } else if (chunk.text && chunk.event !== "complete") {
-          delta = chunk.text;
-        } else if (chunk.delta?.text) {
-          delta = chunk.delta.text;
-        } else if (chunk.content?.text && !accumulated) {
-          delta = chunk.content.text;
-        }
-
-        if (delta) {
-          accumulated += delta;
-          coachPromptText.textContent = accumulated;
-        }
+      // Use the robust stream reader that filters sentinels and handles all frame types
+      const abortController = new AbortController();
+      const streamTimeout = setTimeout(() => abortController.abort(), 10000);
+      let streamResult = null;
+      try {
+        streamResult = await readAgentStream(stream, {
+          onToken: (delta, accumulatedClean) => {
+            if (isRunCancelled) return;
+            coachPromptText.textContent = accumulatedClean;
+          },
+          signal: abortController.signal,
+          logFrames: false,
+        });
+      } finally {
+        clearTimeout(streamTimeout);
       }
 
       if (isRunCancelled) {
@@ -1298,9 +1384,11 @@ async function submitTurn(providedText) {
         return;
       }
 
-      if (accumulated.trim()) {
-        coachText = accumulated.trim();
+      if (streamResult && streamResult.text) {
+        coachText = streamResult.text;
         usedAgent = true;
+      } else if (streamResult && streamResult.error) {
+        console.warn("Agent stream error:", streamResult.error);
       }
     } catch (agentErr) {
       console.warn("Agent run error, falling back to rule engine:", agentErr);
@@ -1338,11 +1426,33 @@ async function submitTurn(providedText) {
   convSubtitle.textContent = `Turn ${turnNumber} · ${currentSource === "agent" ? "AI Coach (Agent Session)" : "Basic mode (rules)"}`;
 
   if (d.correction && !d.correction.isCorrect) {
-    sessionMistakesCount += 1;
+    const cleanedCorr = sanitizeCorrection(d.correction, text);
+    if (cleanedCorr && !cleanedCorr.isCorrect) {
+      sessionMistakesCount += 1;
+      sessionMistakes.push(cleanedCorr);
+    }
     loadProgress(); // Reload notebook in background
   }
 
-  const finalCoachMessage = coachText || d.full_message || `${d.coach_reply} ${d.follow_up || ""}`.trim();
+  // Collect vocabulary for session summary
+  if (d.vocabulary && d.vocabulary.length > 0) {
+    sessionVocabulary.push(...d.vocabulary);
+  }
+
+  // Build the final spoken prompt using hybrid coach formatter
+  const profile = profileManager.getProfile();
+  const correctionStyle = profile.correctionStyle || "balanced";
+  const rawFinalMessage = coachText || d.full_message || `${d.coach_reply} ${d.follow_up || ""}`.trim();
+
+  // If in hands-free mode, format for concise spoken delivery
+  const finalCoachMessage = handsFreeEnabled
+    ? formatSpokenTurn({
+        correction: d.correction,
+        reply: coachText || d.coach_reply || "",
+        followUp: d.follow_up || "",
+        correctionStyle,
+      })
+    : rawFinalMessage;
   displayCoachTurn(finalCoachMessage, d.hint, d.vocabulary || []);
   displayLiveFeedback(d.grammar_notes || [], d.correction);
 
@@ -1692,11 +1802,355 @@ async function main() {
     if (e.key === "Escape") {
       vocabPopup.classList.remove("visible");
       privacyModal?.classList.remove("open");
+      $("onboarding-modal")?.classList.remove("open");
+      $("profile-modal")?.classList.remove("open");
       if (isSubmitting) cancelActiveRun();
       if (isListening) stopListening();
       stopCoachAudio();
     }
   });
+
+  // ─── Storage Migration (Safety Rule 2) ────────────────────────────────────
+  const migrationResult = runStorageMigration(storageAdapter);
+  if (migrationResult.migrated) {
+    console.info(`[SpeakUp AI] Storage migrated from v${migrationResult.fromVersion} to v${migrationResult.toVersion}`);
+  }
+
+  // ─── Apply user settings from localStorage ───────────────────────────────
+  const savedSettings = storageAdapter.get(KEY_SETTINGS, DEFAULT_SETTINGS);
+  if (savedSettings.fontSize === "large") {
+    document.body.classList.add("font-large");
+    if (fontSizeLabel) fontSizeLabel.textContent = "A-";
+  }
+  speechRate = savedSettings.audioPlaybackSpeed || 1.0;
+  handsFreeEnabled = savedSettings.handsFreeMode || false;
+
+  // ─── Surprise Me Button ───────────────────────────────────────────────────
+  $("btn-surprise")?.addEventListener("click", () => {
+    const profile = profileManager.getProfile();
+    const picked = pickSurpriseScenario(profile);
+    if (picked) {
+      selectedScenario = picked.key;
+      document.querySelectorAll(".scenario-card").forEach((c) => {
+        c.classList.toggle("selected", c.dataset.key === picked.key);
+      });
+      toast(`Surprise! Let's try: ${picked.title}`, "ok");
+    }
+  });
+
+  // ─── Persona Tone & Difficulty Selectors ──────────────────────────────────
+  $("persona-tone-select")?.addEventListener("change", (e) => {
+    selectedTone = e.target.value;
+  });
+  $("difficulty-select")?.addEventListener("change", (e) => {
+    selectedDifficulty = e.target.value;
+  });
+
+  // ─── Mode Toggle: Screen vs Hands-Free ────────────────────────────────────
+  const modeScreenBtn = $("mode-screen-btn");
+  const modeHandsfreeBtn = $("mode-handsfree-btn");
+  const safetyNotice = $("safety-notice");
+  if (safetyNotice) safetyNotice.style.display = "none";
+
+  modeScreenBtn?.addEventListener("click", () => {
+    selectedMode = "screen";
+    modeScreenBtn.classList.add("active");
+    modeHandsfreeBtn?.classList.remove("active");
+    if (safetyNotice) safetyNotice.style.display = "none";
+  });
+  modeHandsfreeBtn?.addEventListener("click", () => {
+    selectedMode = "handsfree";
+    modeHandsfreeBtn.classList.add("active");
+    modeScreenBtn?.classList.remove("active");
+    if (safetyNotice) safetyNotice.style.display = "flex";
+  });
+
+  // ─── Profile Button → Profile Modal ───────────────────────────────────────
+  $("profile-btn")?.addEventListener("click", () => {
+    renderProfileModal();
+    $("profile-modal")?.classList.add("open");
+  });
+  $("close-profile-btn")?.addEventListener("click", () => {
+    $("profile-modal")?.classList.remove("open");
+  });
+  $("clear-memory-btn")?.addEventListener("click", () => {
+    profileManager.clearAllMemoryHighlights();
+    renderProfileModal();
+    toast("Coach memory cleared.", "ok");
+  });
+  $("restart-onboarding-btn")?.addEventListener("click", () => {
+    $("profile-modal")?.classList.remove("open");
+    profileManager.saveProfile({ onboardingCompleted: false });
+    showOnboarding();
+  });
+
+  // ─── Data Restore (file input) ────────────────────────────────────────────
+  $("restore-file-input")?.addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const result = restoreUserData(payload, storageAdapter);
+      if (result.success) {
+        toast("Data restored successfully. Reloading…", "ok");
+        setTimeout(() => location.reload(), 1200);
+      } else {
+        toast(result.message, "error");
+      }
+    } catch (err) {
+      toast("Invalid backup file: " + err.message, "error");
+    }
+    e.target.value = "";
+  });
+
+  // ─── Enhanced Export (omnibus JSON) ────────────────────────────────────────
+  const origExportHandler = exportDataBtn?.onclick;
+  exportDataBtn?.addEventListener("click", async () => {
+    try {
+      // Fetch APS data if available
+      let apsData = {};
+      const nbRes = await callTool("get_notebook", { limit: 100 });
+      if (nbRes.success && nbRes.data) {
+        apsData.notebook = nbRes.data.entries || [];
+        apsData.progress = nbRes.data.progress || {};
+      }
+      const fullExport = exportAllUserData(storageAdapter, apsData);
+      const blob = new Blob([JSON.stringify(fullExport, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `speakup-ai-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("Data exported successfully.", "ok");
+    } catch (err) {
+      toast("Export failed: " + err.message, "error");
+    }
+  });
+
+  // ─── Settings Sliders ─────────────────────────────────────────────────────
+  const silenceSlider = $("silence-threshold-slider");
+  const silenceVal = $("silence-threshold-val");
+  silenceSlider?.addEventListener("input", (e) => {
+    const val = parseFloat(e.target.value);
+    if (silenceVal) silenceVal.textContent = val.toFixed(1) + "s";
+  });
+  const speechRateSlider = $("speech-rate-slider");
+  const speechRateVal = $("speech-rate-val");
+  speechRateSlider?.addEventListener("input", (e) => {
+    speechRate = parseFloat(e.target.value);
+    if (speechRateVal) speechRateVal.textContent = speechRate.toFixed(1) + "x";
+  });
+
+  // ─── Hands-Free Overlay Controls ──────────────────────────────────────────
+  $("hf-pause-btn")?.addEventListener("click", () => togglePauseSession());
+  $("hf-repeat-btn")?.addEventListener("click", () => replayCoachPrompt());
+  $("hf-end-btn")?.addEventListener("click", () => endSession("manual"));
+
+  // ─── Spaced Repetition Review Button ──────────────────────────────────────
+  $("practice-cards-btn")?.addEventListener("click", () => {
+    const cardBox = $("spaced-card-box");
+    const cardContent = $("spaced-card-content");
+    if (!cardBox || !cardContent) return;
+
+    const cards = generateSpacedRepetitionCards(notebookEntries.filter(e => e.status !== "fixed"));
+    if (cards.length === 0) {
+      cardContent.innerHTML = `<p style="color:var(--text3); font-size:11px;">No items to review right now. Practice more to collect mistakes!</p>`;
+    } else {
+      const card = cards[Math.floor(Math.random() * cards.length)];
+      cardContent.innerHTML = `
+        <p style="font-size:12px; color:var(--text);">${escHtml(card.blankedSentence)}</p>
+        <details style="font-size:11px; color:var(--text2); margin-top:6px;">
+          <summary style="cursor:pointer; color:var(--accent);">Show Answer</summary>
+          <p style="margin-top:4px;"><strong>Correct:</strong> ${escHtml(card.corrected)}</p>
+          <p><strong>Why:</strong> ${escHtml(card.explanation)}</p>
+        </details>
+      `;
+    }
+    cardBox.style.display = "flex";
+  });
+  $("close-spaced-btn")?.addEventListener("click", () => {
+    const cardBox = $("spaced-card-box");
+    if (cardBox) cardBox.style.display = "none";
+  });
+
+  // ─── Audio Device Enumeration (Settings Modal) ────────────────────────────
+  async function populateAudioDevices() {
+    const devices = await getAvailableAudioDevices();
+    const inputSelect = $("audio-input-select");
+    const outputSelect = $("audio-output-select");
+    if (inputSelect) {
+      inputSelect.innerHTML = '<option value="default">Default System Microphone</option>';
+      devices.filter(d => d.kind === "audioinput").forEach(d => {
+        const opt = document.createElement("option");
+        opt.value = d.deviceId;
+        opt.textContent = d.label;
+        inputSelect.appendChild(opt);
+      });
+    }
+    if (outputSelect) {
+      outputSelect.innerHTML = '<option value="default">Default System Audio Output</option>';
+      devices.filter(d => d.kind === "audiooutput").forEach(d => {
+        const opt = document.createElement("option");
+        opt.value = d.deviceId;
+        opt.textContent = d.label;
+        outputSelect.appendChild(opt);
+      });
+    }
+  }
+  settingsBtn?.addEventListener("click", () => {
+    populateAudioDevices();
+  });
+
+  // ─── Media Session for headset play/pause ─────────────────────────────────
+  setupMediaSession({
+    onPlay: () => { if (isPaused) togglePauseSession(); },
+    onPause: () => { if (!isPaused) togglePauseSession(); },
+    onStop: () => endSession("manual"),
+  });
+
+  // ─── Onboarding: Show on first launch ─────────────────────────────────────
+  if (!profileManager.isOnboardingComplete()) {
+    setTimeout(() => showOnboarding(), 600);
+  }
+}
+
+// ─── Onboarding Wizard ────────────────────────────────────────────────────────
+
+function showOnboarding() {
+  const modal = $("onboarding-modal");
+  if (!modal) return;
+  modal.classList.add("open");
+
+  let stepIdx = 0;
+  const answers = {};
+
+  function renderStep() {
+    const q = ONBOARDING_QUESTIONS[stepIdx];
+    const indicator = $("onboarding-step-indicator");
+    const titleEl = $("modal-onboarding-title");
+    const questionText = $("onboarding-question-text");
+    const inputContainer = $("onboarding-input-container");
+    const nextBtn = $("onboarding-next-btn");
+
+    if (indicator) indicator.textContent = `Question ${stepIdx + 1} of ${ONBOARDING_QUESTIONS.length}`;
+    if (titleEl) titleEl.textContent = stepIdx === 0 ? "Welcome to SpeakUp AI" : "Tell us about you";
+    if (questionText) questionText.textContent = q.question;
+    if (nextBtn) nextBtn.textContent = stepIdx === ONBOARDING_QUESTIONS.length - 1 ? "Finish ✓" : "Next →";
+
+    inputContainer.innerHTML = "";
+
+    if (q.options) {
+      const optDiv = document.createElement("div");
+      optDiv.className = "onboarding-options";
+      q.options.forEach((opt) => {
+        const btn = document.createElement("button");
+        btn.className = "onboarding-option-btn";
+        btn.textContent = opt.label;
+        btn.type = "button";
+        if (answers[q.field] === opt.value) btn.classList.add("selected");
+        btn.addEventListener("click", () => {
+          answers[q.field] = opt.value;
+          optDiv.querySelectorAll(".onboarding-option-btn").forEach(b => b.classList.remove("selected"));
+          btn.classList.add("selected");
+        });
+        optDiv.appendChild(btn);
+      });
+      inputContainer.appendChild(optDiv);
+    } else if (q.isTags) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = q.placeholder || "";
+      input.value = Array.isArray(answers[q.field]) ? answers[q.field].join(", ") : "";
+      input.style.cssText = "width:100%;padding:8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);font-size:12px;";
+      input.addEventListener("input", () => {
+        answers[q.field] = input.value.split(",").map(s => s.trim()).filter(Boolean);
+      });
+      inputContainer.appendChild(input);
+    } else {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = q.placeholder || "";
+      input.value = answers[q.field] || "";
+      input.style.cssText = "width:100%;padding:8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);font-size:12px;";
+      input.addEventListener("input", () => {
+        answers[q.field] = input.value.trim();
+      });
+      inputContainer.appendChild(input);
+    }
+  }
+
+  renderStep();
+
+  $("onboarding-next-btn")?.addEventListener("click", () => {
+    stepIdx += 1;
+    if (stepIdx >= ONBOARDING_QUESTIONS.length) {
+      profileManager.completeOnboarding(answers);
+      modal.classList.remove("open");
+      toast(`Welcome, ${answers.displayName || "Learner"}! Let's practice.`, "ok");
+
+      // Apply selected daily goal to duration picker
+      if (answers.dailyGoalMins) {
+        selectedDurationMins = Number(answers.dailyGoalMins) || 10;
+        if (sessionDurationMeta) sessionDurationMeta.textContent = `⏱ ${selectedDurationMins} minutes`;
+      }
+    } else {
+      renderStep();
+    }
+  });
+
+  $("onboarding-skip-btn")?.addEventListener("click", () => {
+    profileManager.skipOnboarding();
+    modal.classList.remove("open");
+    toast("Onboarding skipped. You can retake it from your Profile.", "info");
+  });
+
+  $("close-onboarding-btn")?.addEventListener("click", () => {
+    profileManager.skipOnboarding();
+    modal.classList.remove("open");
+  });
+}
+
+// ─── Profile Modal Renderer ───────────────────────────────────────────────────
+
+function renderProfileModal() {
+  const profile = profileManager.getProfile();
+  const detailsEl = $("profile-summary-details");
+  const memoryListEl = $("profile-memory-list");
+
+  if (detailsEl) {
+    detailsEl.innerHTML = `
+      <div><strong>Name:</strong> ${escHtml(profile.displayName)}</div>
+      <div><strong>Native Language:</strong> ${escHtml(profile.nativeLanguage)}</div>
+      <div><strong>Goal:</strong> ${escHtml(profile.primaryGoal)}</div>
+      <div><strong>CEFR Level:</strong> ${escHtml(profile.targetCefr)}</div>
+      <div><strong>Correction Style:</strong> ${escHtml(profile.correctionStyle)}</div>
+      <div><strong>Daily Goal:</strong> ${profile.dailyGoalMins || 10} minutes</div>
+      <div><strong>Interests:</strong> ${Array.isArray(profile.topicsOfInterest) ? profile.topicsOfInterest.join(", ") : "General"}</div>
+    `;
+  }
+
+  if (memoryListEl) {
+    const highlights = profile.memoryHighlights || [];
+    if (highlights.length === 0) {
+      memoryListEl.innerHTML = '<p style="font-size:11px;color:var(--text3);">No learned preferences yet. The coach learns about you through conversations.</p>';
+    } else {
+      memoryListEl.innerHTML = highlights.map((h, i) => `
+        <div class="memory-item">
+          <span>${escHtml(h)}</span>
+          <button title="Delete this memory" data-idx="${i}">🗑</button>
+        </div>
+      `).join("");
+      memoryListEl.querySelectorAll("button[data-idx]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const idx = parseInt(btn.dataset.idx, 10);
+          profileManager.deleteMemoryHighlight(idx);
+          renderProfileModal();
+        });
+      });
+    }
+  }
 }
 
 main().catch((err) => {

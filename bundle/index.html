@@ -890,6 +890,87 @@
       .toast.warn { border-color: var(--warn); color: var(--warn); }
       .toast.error { border-color: var(--error); color: var(--error); }
       .toast.ok    { border-color: var(--accent); color: var(--accent); }
+      /* Additional Styles for Steps 2-6 */
+      .roleplay-controls {
+        display: flex; gap: 10px; margin: 8px 0 14px 0; flex-wrap: wrap;
+      }
+      .roleplay-select-group {
+        flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 4px;
+      }
+      .roleplay-select-group label {
+        font-size: 11px; color: var(--text3); font-weight: 500;
+      }
+      .roleplay-select {
+        background: var(--bg-card); border: 1px solid var(--border); color: var(--text);
+        padding: 6px 8px; border-radius: var(--radius-sm); font-size: 12px;
+      }
+      .mode-toggle-group {
+        display: flex; gap: 8px; align-items: center; justify-content: center; margin: 6px 0;
+      }
+      .mode-pill {
+        background: var(--bg-card); border: 1px solid var(--border); color: var(--text2);
+        padding: 6px 14px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600;
+        cursor: pointer;
+      }
+      .mode-pill.active {
+        background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+      }
+      .safety-badge {
+        font-size: 10px; color: var(--warn); display: flex; align-items: center; gap: 4px; justify-content: center; margin-top: 4px;
+      }
+      .btn-surprise {
+        background: linear-gradient(135deg, rgba(192, 132, 252, 0.2), rgba(56, 189, 248, 0.2));
+        border: 1px solid var(--purple); color: var(--text);
+        padding: 6px 12px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600;
+        cursor: pointer; transition: var(--transition);
+      }
+      .btn-surprise:hover {
+        background: linear-gradient(135deg, rgba(192, 132, 252, 0.35), rgba(56, 189, 248, 0.35));
+      }
+      .handsfree-overlay {
+        display: none; flex-direction: column; align-items: center; justify-content: center;
+        background: var(--bg-surface); border: 1.5px solid var(--accent); border-radius: var(--radius);
+        padding: 24px 16px; margin: 12px 0; text-align: center; gap: 14px;
+      }
+      .handsfree-overlay.active { display: flex; }
+      .hf-status-badge {
+        font-size: 14px; font-weight: 700; color: var(--accent); display: flex; align-items: center; gap: 6px;
+      }
+      .hf-captions {
+        font-size: 13px; color: var(--text2); max-width: 90%; min-height: 40px; font-style: italic;
+      }
+      .hf-actions {
+        display: flex; gap: 12px; margin-top: 4px;
+      }
+      .hf-big-btn {
+        padding: 10px 20px; font-size: 13px; font-weight: 600; border-radius: var(--radius-pill); cursor: pointer;
+      }
+      .memory-item {
+        display: flex; justify-content: space-between; align-items: center;
+        background: var(--bg-card); padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+        font-size: 11px;
+      }
+      .memory-item button {
+        background: transparent; color: var(--error); border: none; cursor: pointer; font-size: 13px;
+      }
+      .spaced-card-box {
+        background: var(--bg-card); border: 1.5px solid var(--purple); border-radius: var(--radius);
+        padding: 16px; margin-top: 10px; display: flex; flex-direction: column; gap: 10px;
+      }
+      .onboarding-step-indicator {
+        font-size: 11px; color: var(--text3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+      }
+      .onboarding-options {
+        display: flex; flex-direction: column; gap: 6px; margin-top: 8px;
+      }
+      .onboarding-option-btn {
+        background: var(--bg-card); border: 1px solid var(--border); color: var(--text);
+        padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12px; text-align: left; cursor: pointer;
+        transition: var(--transition);
+      }
+      .onboarding-option-btn:hover, .onboarding-option-btn.selected {
+        background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+      }
     </style>
   </head>
   <body>
@@ -921,11 +1002,14 @@
             <p>English Conversation Practice Coach</p>
           </div>
           <div class="home-header-actions">
+            <button class="btn-icon-subtle" id="profile-btn" title="Learner Profile & Onboarding" aria-label="Learner Profile">
+              <span>👤</span> Profile
+            </button>
             <button class="btn-icon-subtle" id="font-toggle-btn" title="Toggle text size" aria-label="Toggle text size">
               <span id="font-size-label">A+</span>
             </button>
             <button class="btn-icon-subtle" id="settings-btn" title="Settings & Privacy" aria-label="Settings and Privacy">
-              <span>⚙️</span> Privacy
+              <span>⚙️</span> Settings
             </button>
           </div>
         </div>
@@ -945,11 +1029,45 @@
           </div>
         </div>
 
-        <p class="section-title">Choose a scenario</p>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px;">
+          <p class="section-title" style="margin:0;">Choose a scenario</p>
+          <button class="btn-surprise" id="btn-surprise" type="button">🎲 Surprise Me</button>
+        </div>
+
+        <!-- Roleplay tone and difficulty controls -->
+        <div class="roleplay-controls">
+          <div class="roleplay-select-group">
+            <label for="persona-tone-select">Persona & Tone</label>
+            <select class="roleplay-select" id="persona-tone-select">
+              <option value="friendly">Friendly & Encouraging</option>
+              <option value="formal">Professional & Polished</option>
+              <option value="strict_interviewer">Strict Interviewer</option>
+            </select>
+          </div>
+          <div class="roleplay-select-group">
+            <label for="difficulty-select">Difficulty Level</label>
+            <select class="roleplay-select" id="difficulty-select">
+              <option value="beginner">Beginner (A1-A2)</option>
+              <option value="intermediate" selected>Intermediate (B1-B2)</option>
+              <option value="advanced">Advanced (C1)</option>
+            </select>
+          </div>
+        </div>
+
         <div class="scenario-grid" id="scenario-grid" role="list"></div>
 
         <div class="home-cta">
-          <div style="font-size:11px;color:var(--text2);text-align:center;font-weight:600;">Choose practice duration:</div>
+          <!-- Mode Toggle: Screen vs Hands-Free -->
+          <div style="font-size:11px;color:var(--text2);text-align:center;font-weight:600;">Choose practice mode:</div>
+          <div class="mode-toggle-group">
+            <button class="mode-pill active" id="mode-screen-btn" type="button">🖥️ Screen Mode</button>
+            <button class="mode-pill" id="mode-handsfree-btn" type="button">👐 Hands-Free Mode</button>
+          </div>
+          <div class="safety-badge" id="safety-notice">
+            <span>⚠️</span> Hands-free mode is for walking or chores. Stay aware; do not use while driving.
+          </div>
+
+          <div style="font-size:11px;color:var(--text2);text-align:center;font-weight:600;margin-top:10px;">Choose practice duration:</div>
           <div class="duration-selector" id="duration-selector">
             <button class="duration-pill" data-mins="5" type="button">5m</button>
             <button class="duration-pill selected" data-mins="10" type="button">10m</button>
@@ -1058,6 +1176,25 @@
             </div>
           </div>
 
+          <!-- Minimal Hands-Free Display Overlay (active when handsFreeMode is enabled) -->
+          <div class="handsfree-overlay" id="handsfree-overlay" aria-live="polite">
+            <div class="hf-status-badge">
+              <span id="hf-status-icon">👂</span>
+              <span id="hf-status-text">Listening… Speak freely</span>
+            </div>
+            <div class="hf-captions" id="hf-captions">"Say 'Pause' or speak your answer naturally."</div>
+            <div class="session-meta">
+              <span id="hf-latency-badge">⚡ Latency: --</span>
+              <div class="dot"></div>
+              <span id="hf-wakelock-badge">💡 Wake Lock active</span>
+            </div>
+            <div class="hf-actions">
+              <button class="btn-secondary hf-big-btn" id="hf-pause-btn" type="button">⏸ Pause</button>
+              <button class="btn-secondary hf-big-btn" id="hf-repeat-btn" type="button">🔁 Repeat</button>
+              <button class="btn-secondary hf-big-btn" id="hf-end-btn" type="button" style="color:var(--error);border-color:var(--error-soft);">■ End</button>
+            </div>
+          </div>
+
           <!-- 2. HIGH-CONTRAST CENTER MICROPHONE STAGE -->
           <div class="speaking-center-stage" id="speaking-center-stage">
             <div class="mic-button-wrap">
@@ -1141,9 +1278,20 @@
               <button class="nb-pill" data-filter="practising">Practising</button>
               <button class="nb-pill" data-filter="fixed">Mastered</button>
             </div>
-            <div class="nb-search-wrap">
-              <input type="search" id="nb-search-input" placeholder="Search saved corrections…" />
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button class="btn-secondary" id="practice-cards-btn" style="padding:5px 10px;font-size:11px;" type="button">🧠 Review Cards</button>
+              <div class="nb-search-wrap">
+                <input type="search" id="nb-search-input" placeholder="Search saved corrections…" />
+              </div>
             </div>
+          </div>
+          <!-- Spaced Repetition Practice Container -->
+          <div class="spaced-card-box" id="spaced-card-box" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:700; color:var(--purple); font-size:12px;">Spaced Repetition Review</span>
+              <button class="btn-icon" id="close-spaced-btn" style="font-size:11px;" type="button">✕</button>
+            </div>
+            <div id="spaced-card-content"></div>
           </div>
           <div class="notebook-list" id="notebook-list">
             <p class="nb-empty">No corrections saved yet. Practice speaking to capture learning points!</p>
@@ -1248,26 +1396,104 @@
       <div class="modal-backdrop" id="privacy-modal" role="dialog" aria-modal="true" aria-labelledby="modal-privacy-title">
         <div class="modal-box">
           <div class="modal-header">
-            <h3 id="modal-privacy-title">⚙️ Settings & Privacy Transparency</h3>
+            <h3 id="modal-privacy-title">⚙️ Audio Settings & Privacy</h3>
             <button class="btn-icon" id="close-modal-btn" aria-label="Close modal">✕</button>
           </div>
           <div class="modal-body">
-            <h4>Data Storage & Scoping</h4>
+            <h4>Audio Hardware & Voice Input</h4>
+            <div class="roleplay-select-group">
+              <label for="audio-input-select">Microphone Device</label>
+              <select class="roleplay-select" id="audio-input-select">
+                <option value="default">Default System Microphone</option>
+              </select>
+            </div>
+            <div class="roleplay-select-group">
+              <label for="audio-output-select">Speaker / Headset Device</label>
+              <select class="roleplay-select" id="audio-output-select">
+                <option value="default">Default System Audio Output</option>
+              </select>
+            </div>
+
+            <h4>Hands-Free Silence Detection & Speech</h4>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span>Silence detection pause threshold</span>
+              <span id="silence-threshold-val" style="font-weight:600; color:var(--accent);">1.8s</span>
+            </div>
+            <input type="range" id="silence-threshold-slider" min="1.0" max="3.0" step="0.2" value="1.8" />
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+              <span>Coach speech playback rate</span>
+              <span id="speech-rate-val" style="font-weight:600; color:var(--accent);">1.0x</span>
+            </div>
+            <input type="range" id="speech-rate-slider" min="0.8" max="1.4" step="0.1" value="1.0" />
+
+            <h4>Voice Commands & Wake Lock</h4>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="voice-commands-checkbox" checked />
+              <span>Enable voice commands ('Pause', 'Repeat', 'Slower', 'End session')</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="wakelock-checkbox" checked />
+              <span>Keep screen awake during practice (Screen Wake Lock)</span>
+            </label>
+
+            <h4>Data Rights & Control (Safety Rule 2)</h4>
             <p>
-              Your notebook entries and progress counters are stored securely in your Anna Persistent Storage (APS KV) tool partition. All data is scoped to your Anna account. No external database, third-party analytics, or cross-site tracking cookies are used.
-            </p>
-            <h4>AI Coaching vs Basic Mode</h4>
-            <p>
-              When your Anna plan supports LLM Sampling, the coach requests completions from Anna's native host LLM (reverse Sampling). If Sampling is unavailable or denied, the app automatically runs in deterministic, rule-based basic mode. We never present rule-based responses as AI output.
-            </p>
-            <h4>Data Rights & Control</h4>
-            <p>
-              You have full control over your stored practice records. You may export your entire notebook and progress as JSON or delete all records at any time.
+              Your data is stored securely in your private Anna Persistent Storage (APS KV) and local device cache. You can export an omnibus JSON backup or restore an existing backup at any time.
             </p>
           </div>
           <div class="modal-actions">
             <button class="btn-secondary" id="export-data-btn">📥 Export Data (JSON)</button>
+            <label class="btn-secondary" style="cursor:pointer; display:inline-flex; align-items:center;">
+              📤 Restore Data
+              <input type="file" id="restore-file-input" accept=".json" style="display:none;" />
+            </label>
             <button class="btn-secondary" id="clear-data-btn" style="color:var(--error);border-color:var(--error-soft);">🗑 Delete All Data</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ ONBOARDING WIZARD MODAL ═════════════════════════ -->
+      <div class="modal-backdrop" id="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="modal-onboarding-title">
+        <div class="modal-box">
+          <div class="modal-header">
+            <div>
+              <div class="onboarding-step-indicator" id="onboarding-step-indicator">Question 1 of 7</div>
+              <h3 id="modal-onboarding-title">Welcome to SpeakUp AI</h3>
+            </div>
+            <button class="btn-icon" id="close-onboarding-btn" aria-label="Skip onboarding">✕</button>
+          </div>
+          <div class="modal-body" id="onboarding-body">
+            <p id="onboarding-question-text" style="font-size:13px; font-weight:600; color:var(--text);"></p>
+            <div id="onboarding-input-container"></div>
+          </div>
+          <div class="modal-actions" style="justify-content:space-between;">
+            <button class="btn-secondary" id="onboarding-skip-btn" type="button">Skip for now</button>
+            <button class="btn-primary" id="onboarding-next-btn" type="button">Next →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ PROFILE & MEMORY MODAL ══════════════════════════ -->
+      <div class="modal-backdrop" id="profile-modal" role="dialog" aria-modal="true" aria-labelledby="modal-profile-title">
+        <div class="modal-box">
+          <div class="modal-header">
+            <h3 id="modal-profile-title">👤 What the Coach Knows About Me</h3>
+            <button class="btn-icon" id="close-profile-btn" aria-label="Close modal">✕</button>
+          </div>
+          <div class="modal-body">
+            <p>
+              Your coach remembers your goals, CEFR level, and topic interests to provide personalized conversation practice. Sensitive data (passwords, health, financials) is never retained.
+            </p>
+            <div id="profile-summary-details" style="background:var(--bg-card); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border); font-size:11px; display:flex; flex-direction:column; gap:4px;"></div>
+
+            <h4>Learned Preferences & Highlights</h4>
+            <div id="profile-memory-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button class="btn-secondary" id="restart-onboarding-btn" type="button">🔄 Retake Onboarding</button>
+              <button class="btn-secondary" id="clear-memory-btn" style="color:var(--error);border-color:var(--error-soft);" type="button">🗑 Clear Memory</button>
+            </div>
           </div>
         </div>
       </div>

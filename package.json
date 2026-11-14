@@ -5,6 +5,7 @@
   "type": "module",
   "description": "SpeakUp AI — Anna App English Conversation Practice Coach",
   "scripts": {
+    "dev": "anna-app dev --executa dir=./executas/speakup-ai,tool_id=tool-dev-speakup-ai,type=python",
     "tool:describe": "node scripts/check-describe.js",
     "check": "node scripts/check-describe.js && anna-app validate --strict",
     "validate": "anna-app validate --strict"

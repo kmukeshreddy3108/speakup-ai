@@ -222,6 +222,267 @@ SCENARIOS = {
             },
         ],
     },
+    "free_talk": {
+        "title": "Free Talk (My Day)",
+        "icon": "☕",
+        "description": "Casual, open-ended talk about your day, feelings, and thoughts.",
+        "opening_prompt": "Hello! Let's just talk freely about your day. How are you feeling right now, and what has been on your mind?",
+        "opening_hint": "Try: 'I'm feeling pretty relaxed today. Earlier, I was thinking about …'",
+        "opening_vocab": [
+            {"word": "on my mind", "meaning": "something you have been thinking about frequently", "example": "A new project idea has been on my mind all morning."},
+            {"word": "unwind", "meaning": "to relax and let go of stress", "example": "It's nice to unwind and have a casual chat."},
+        ],
+        "stages": [
+            {
+                "focus": "highlights",
+                "question": "What was the most interesting or memorable part of your day so far?",
+                "hint": "Mention an interaction, task, or realization.",
+                "vocab": [
+                    {"word": "highlight", "meaning": "an outstanding or memorable event", "example": "The highlight was lunch with an old friend."},
+                ],
+            },
+            {
+                "focus": "routine",
+                "question": "Do you usually follow a strict daily routine, or do you prefer to take things as they come?",
+                "hint": "Explain how you structure your time and why.",
+                "vocab": [
+                    {"word": "spontaneous", "meaning": "happening naturally without being planned", "example": "I prefer being spontaneous on weekends."},
+                ],
+            },
+        ],
+    },
+    "workplace": {
+        "title": "Workplace & Meetings",
+        "icon": "📊",
+        "description": "Stand-ups, project updates, and professional workplace discussions.",
+        "opening_prompt": "Welcome to our team sync! Let's do a quick round of updates. Could you share what you've been working on and whether you're facing any blockers?",
+        "opening_hint": "Try: 'Over the past couple of days, my main focus has been … Currently, I don't have any major blockers.'",
+        "opening_vocab": [
+            {"word": "blocker", "meaning": "an obstacle that prevents progress", "example": "We have a dependency blocker from the infrastructure team."},
+            {"word": "bandwidth", "meaning": "capacity or available time to take on tasks", "example": "I have bandwidth to review PRs this afternoon."},
+        ],
+        "stages": [
+            {
+                "focus": "priorities",
+                "question": "Looking ahead to the rest of the week, what is your top deliverable?",
+                "hint": "State the key milestone you intend to complete.",
+                "vocab": [
+                    {"word": "deliverable", "meaning": "a tangible outcome or product produced for a project", "example": "The design spec is our primary deliverable this sprint."},
+                ],
+            },
+            {
+                "focus": "collaboration",
+                "question": "Is there any cross-functional help you need from engineering, design, or product to get this across the finish line?",
+                "hint": "Specify who you need to align with.",
+                "vocab": [
+                    {"word": "align", "meaning": "to bring into agreement or close cooperation", "example": "Let's align with the product manager before signing off."},
+                ],
+            },
+        ],
+    },
+    "ordering_food": {
+        "title": "Ordering Food & Shopping",
+        "icon": "🍔",
+        "description": "Order meals, ask about ingredients, customize dishes, and pay bills.",
+        "opening_prompt": "Good evening! Welcome to Bistro Bella. Can I start you off with something to drink, or are you ready to order food?",
+        "opening_hint": "Try: 'Could I start with some sparkling water, please? And what do you recommend for dinner?'",
+        "opening_vocab": [
+            {"word": "recommend", "meaning": "to suggest as good or desirable", "example": "What do you recommend for someone who loves seafood?"},
+            {"word": "sparkling", "meaning": "effervescent or carbonated water", "example": "I would like a glass of sparkling water with lemon."},
+        ],
+        "stages": [
+            {
+                "focus": "customization",
+                "question": "Sure thing! Are there any dietary restrictions or preferences I should let the kitchen know about?",
+                "hint": "Mention any allergies or ingredient swaps.",
+                "vocab": [
+                    {"word": "substitute", "meaning": "to use or add in place of another", "example": "Can I substitute fries for a side salad?"},
+                ],
+            },
+            {
+                "focus": "payment",
+                "question": "How did everything taste for you tonight? Can I get you some dessert or the check?",
+                "hint": "Offer feedback and ask for the bill.",
+                "vocab": [
+                    {"word": "check", "meaning": "the bill at a restaurant", "example": "Could we have the check whenever you're ready, please?"},
+                ],
+            },
+        ],
+    },
+    "customer_service": {
+        "title": "Customer Service Call",
+        "icon": "🎧",
+        "description": "Politely explain a billing or delivery issue and get it resolved.",
+        "opening_prompt": "Thank you for calling Apex Support, my name is Alex. How can I help you today?",
+        "opening_hint": "Try: 'Hello Alex, I'm calling about an issue with my recent order. It arrived damaged / late.'",
+        "opening_vocab": [
+            {"word": "discrepancy", "meaning": "an unexpected difference or inconsistency", "example": "There is a discrepancy between the invoiced amount and the quote."},
+            {"word": "resolve", "meaning": "to find a solution to a problem", "example": "I hope we can resolve this matter quickly."},
+        ],
+        "stages": [
+            {
+                "focus": "order_details",
+                "question": "I'm so sorry to hear about that trouble. Could you provide your order number and briefly explain what happened?",
+                "hint": "Give a clear factual timeline.",
+                "vocab": [
+                    {"word": "tracking number", "meaning": "unique code used to monitor a package's shipping progress", "example": "The tracking number shows it was delivered to the wrong address."},
+                ],
+            },
+            {
+                "focus": "resolution",
+                "question": "Would you prefer a full refund back to your original payment method, or an expedited replacement sent right away?",
+                "hint": "State your preferred remedy clearly.",
+                "vocab": [
+                    {"word": "expedited", "meaning": "accelerated or made faster", "example": "An expedited replacement would be ideal, thank you."},
+                ],
+            },
+        ],
+    },
+    "phone_call": {
+        "title": "Phone Call Practice",
+        "icon": "📱",
+        "description": "Practice phone conversations without visual cues or lip reading.",
+        "opening_prompt": "Hello! Thanks for returning my call. Am I catching you at a good time to discuss the upcoming schedule?",
+        "opening_hint": "Try: 'Yes, absolutely, I have about ten minutes right now. What's on your mind?'",
+        "opening_vocab": [
+            {"word": "catch at a good time", "meaning": "contact someone when they are free to talk", "example": "Did I catch you at a good time?"},
+            {"word": "follow up", "meaning": "continue communication regarding a previous matter", "example": "I'm calling to follow up on our previous email."},
+        ],
+        "stages": [
+            {
+                "focus": "clarification",
+                "question": "The connection was a little static there. Could you please spell your last name and confirm your email address?",
+                "hint": "Spell clearly using letter names.",
+                "vocab": [
+                    {"word": "static", "meaning": "crackling noise or poor audio on a phone line", "example": "There was some static on the line, could you repeat that?"},
+                ],
+            },
+            {
+                "focus": "next_steps",
+                "question": "Great, I've got that noted. I will send you a calendar invite. Does Thursday at 2 PM work for you?",
+                "hint": "Confirm availability or propose an alternative time.",
+                "vocab": [
+                    {"word": "calendar invite", "meaning": "a digital scheduling invitation", "example": "I just accepted the calendar invite for Thursday."},
+                ],
+            },
+        ],
+    },
+    "travel": {
+        "title": "Travel & Airport",
+        "icon": "✈️",
+        "description": "Navigate flight check-in, border control, asking directions, and hotel check-in.",
+        "opening_prompt": "Good morning! Welcome to International Terminal 4. Where are you flying today, and may I see your passport?",
+        "opening_hint": "Try: 'Good morning! I am flying to London today. Here is my passport and booking confirmation.'",
+        "opening_vocab": [
+            {"word": "boarding pass", "meaning": "document granting permission to board an aircraft", "example": "Here is your passport and boarding pass."},
+            {"word": "carry-on", "meaning": "luggage that a passenger brings into the cabin", "example": "I just have one carry-on bag with me today."},
+        ],
+        "stages": [
+            {
+                "focus": "security_gate",
+                "question": "Do you have any bags to check in today, or just carry-on luggage?",
+                "hint": "Confirm the number of bags you have.",
+                "vocab": [
+                    {"word": "checked luggage", "meaning": "bags stored in the aircraft cargo hold", "example": "I need to check in one suitcase, please."},
+                ],
+            },
+            {
+                "focus": "directions",
+                "question": "Your gate is B24. Boarding starts at 10:15. Do you need directions to the departure gate or currency exchange?",
+                "hint": "Politely ask for directions or thank them.",
+                "vocab": [
+                    {"word": "currency exchange", "meaning": "a booth where money from one country is traded for another", "example": "Could you point me toward the nearest currency exchange?"},
+                ],
+            },
+        ],
+    },
+    "storytelling": {
+        "title": "Storytelling & Banter",
+        "icon": "🎭",
+        "description": "Tell an entertaining personal story, tell a joke, and share anecdotes.",
+        "opening_prompt": "Hey! You mentioned earlier that you had the craziest thing happen to you recently. Don't leave me hanging—what happened?",
+        "opening_hint": "Try: 'You won't believe it! So last week, I was heading home when …'",
+        "opening_vocab": [
+            {"word": "leave me hanging", "meaning": "keep someone in suspense or waiting for information", "example": "Don't leave me hanging, tell me how the story ends!"},
+            {"word": "out of the blue", "meaning": "unexpectedly without any warning", "example": "Then out of the blue, my phone rang."},
+        ],
+        "stages": [
+            {
+                "focus": "climax",
+                "question": "No way! What was going through your mind at that exact moment?",
+                "hint": "Describe the emotional peak or turning point.",
+                "vocab": [
+                    {"word": "surreal", "meaning": "having the bizarre quality of a dream", "example": "It was completely surreal standing there in the rain."},
+                ],
+            },
+            {
+                "focus": "punchline",
+                "question": "Haha, that's hilarious! So how did the whole thing wrap up in the end?",
+                "hint": "Deliver the resolution or lesson learned.",
+                "vocab": [
+                    {"word": "wrap up", "meaning": "to conclude or finish", "example": "The situation wrapped up nicely once we realized the mistake."},
+                ],
+            },
+        ],
+    },
+    "debate": {
+        "title": "Debate an Opinion",
+        "icon": "⚖️",
+        "description": "Take a stand on a controversial or thought-provoking topic with logical arguments.",
+        "opening_prompt": "Welcome to our debate corner! Today's proposition is: 'Remote work is superior to in-office work for all knowledge workers.' Do you agree or disagree, and what is your central argument?",
+        "opening_hint": "Try: 'I strongly agree with this proposition because remote work eliminates commutes and improves focus.'",
+        "opening_vocab": [
+            {"word": "proposition", "meaning": "a statement or assertion that expresses an opinion", "example": "The debate proposition centers on environmental regulations."},
+            {"word": "counterpart", "meaning": "a person or thing holding a corresponding position", "example": "Remote workers often outperform their in-office counterparts."},
+        ],
+        "stages": [
+            {
+                "focus": "counterargument",
+                "question": "A strong counterargument is that junior employees miss out on spontaneous mentoring and hallway collaboration in fully remote settings. How do you respond to that drawback?",
+                "hint": "Acknowledge the point and provide a solution or counterpoint.",
+                "vocab": [
+                    {"word": "drawback", "meaning": "a disadvantage or negative feature", "example": "A potential drawback is feelings of isolation."},
+                ],
+            },
+            {
+                "focus": "synthesis",
+                "question": "Considering both viewpoints, would a hybrid model be the ideal compromise, or should companies pick one definitively?",
+                "hint": "Weigh trade-offs and conclude your stance.",
+                "vocab": [
+                    {"word": "compromise", "meaning": "an agreement reached by each side making concessions", "example": "A structured three-day hybrid schedule is a sensible compromise."},
+                ],
+            },
+        ],
+    },
+    "daily_news": {
+        "title": "Daily News Chat",
+        "icon": "📰",
+        "description": "Discuss a news article, tech breakthrough, or cultural event that you recently read.",
+        "opening_prompt": "Hello! There has been a lot of interesting news in technology and science this week. Have you come across any headline that caught your attention recently?",
+        "opening_hint": "Try: 'Yes! I recently read an article about new developments in clean energy / space exploration.'",
+        "opening_vocab": [
+            {"word": "catch my attention", "meaning": "to attract one's notice or curiosity", "example": "The headline on renewable energy caught my attention."},
+            {"word": "breakthrough", "meaning": "a sudden, dramatic, and important discovery or development", "example": "Scientists announced a major medical breakthrough yesterday."},
+        ],
+        "stages": [
+            {
+                "focus": "implications",
+                "question": "What do you think are the practical implications of this development for everyday people in the next five to ten years?",
+                "hint": "Reflect on how society, jobs, or lifestyle might change.",
+                "vocab": [
+                    {"word": "implications", "meaning": "the possible results or effects of an action or decision", "example": "This policy has broad economic implications."},
+                ],
+            },
+            {
+                "focus": "perspective",
+                "question": "Do you feel generally optimistic or cautious about this direction of innovation?",
+                "hint": "Share your perspective with supporting rationale.",
+                "vocab": [
+                    {"word": "optimistic", "meaning": "hopeful and confident about the future", "example": "I'm generally optimistic about the potential benefits."},
+                ],
+            },
+        ],
+    },
 }
 
 # ---------------------------------------------------------------------------
